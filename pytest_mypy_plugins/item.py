@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import importlib
 import io
@@ -7,7 +8,18 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, TextIO, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    TextIO,
+    Tuple,
+    Union,
+)
 
 import pytest
 from _pytest._code import ExceptionInfo
@@ -136,6 +148,24 @@ class MypyPluginsConfig:
         # You cannot use both `.ini` and `pyproject.toml` files at the same time:
         if self.base_ini_fpath and self.base_pyproject_toml_fpath:
             raise ValueError("Cannot specify both `--mypy-ini-file` and `--mypy-pyproject-toml-file`")
+
+    @contextlib.contextmanager
+    def make_execution_path(self, cleanup_cache: Callable[[], None]) -> Iterator[Path]:
+        try:
+            temp_dir = tempfile.TemporaryDirectory(prefix="pytest-mypy-", dir=self.root_directory)
+
+        except (FileNotFoundError, PermissionError, NotADirectoryError) as e:
+            raise TypecheckAssertionError(
+                error_message=f"Testing base directory {self.root_directory} must exist and be writable"
+            ) from e
+
+        try:
+            yield Path(temp_dir.name)
+        finally:
+            temp_dir.cleanup()
+            cleanup_cache()
+
+        assert not os.path.exists(temp_dir.name)
 
 
 class MypyExecutor:
@@ -347,6 +377,7 @@ class YamlTestItem(pytest.Item):
             base_pyproject_toml_fpath=utils.maybe_abspath(self.config.option.mypy_pyproject_toml_file),
             extension_hook=self.config.option.mypy_extension_hook,
         )
+        self.mypy_plugins_config = mypy_plugins_config
 
         self.same_process = mypy_plugins_config.same_process
         self.test_only_local_stub = mypy_plugins_config.test_only_local_stub
@@ -354,10 +385,7 @@ class YamlTestItem(pytest.Item):
         self.base_ini_fpath = mypy_plugins_config.base_ini_fpath
         self.base_pyproject_toml_fpath = mypy_plugins_config.base_pyproject_toml_fpath
 
-        # config parameters
-        self.root_directory = mypy_plugins_config.root_directory
-
-        self.incremental_cache_dir = os.path.join(self.root_directory, ".mypy_cache")
+        self.incremental_cache_dir = os.path.join(self.mypy_plugins_config.root_directory, ".mypy_cache")
 
     def remove_cache_files(self, fpath_no_suffix: Path) -> None:
         cache_file = Path(self.incremental_cache_dir)
@@ -386,16 +414,14 @@ class YamlTestItem(pytest.Item):
         extension_hook = getattr(module, func_name)
         extension_hook(self)
 
+    def cleanup_cache(self) -> None:
+        if not self.disable_cache:
+            for file in self.files:
+                path = Path(file.path)
+                self.remove_cache_files(path.with_suffix(""))
+
     def runtest(self) -> None:
-        try:
-            temp_dir = tempfile.TemporaryDirectory(prefix="pytest-mypy-", dir=self.root_directory)
-
-        except (FileNotFoundError, PermissionError, NotADirectoryError) as e:
-            raise TypecheckAssertionError(
-                error_message=f"Testing base directory {self.root_directory} must exist and be writable"
-            ) from e
-
-        try:
+        with self.mypy_plugins_config.make_execution_path(self.cleanup_cache) as execution_path:
             mypy_executable = shutil.which("mypy")
             assert mypy_executable is not None, "mypy executable is not found"
             rootdir = getattr(getattr(self.parent, "config", None), "rootdir", None)
@@ -404,7 +430,6 @@ class YamlTestItem(pytest.Item):
             if self.extension_hook:
                 self.execute_extension_hook(self.extension_hook)
 
-            execution_path = Path(temp_dir.name)
             with utils.cd(execution_path):
                 mypy_executor = MypyExecutor(
                     same_process=self.same_process,
@@ -428,15 +453,6 @@ class YamlTestItem(pytest.Item):
                     test_only_local_stub=self.test_only_local_stub,
                     incremental_cache_dir=self.incremental_cache_dir,
                 ).run()
-        finally:
-            temp_dir.cleanup()
-            # remove created modules
-            if not self.disable_cache:
-                for file in self.files:
-                    path = Path(file.path)
-                    self.remove_cache_files(path.with_suffix(""))
-
-        assert not os.path.exists(temp_dir.name)
 
     def prepare_config_file(self, execution_path: Path) -> Optional[str]:
         # Merge (`self.base_ini_fpath` or `base_pyproject_toml_fpath`)
