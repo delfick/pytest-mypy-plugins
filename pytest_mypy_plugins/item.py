@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     Dict,
     Iterator,
     List,
@@ -19,6 +18,7 @@ from typing import (
     MutableSequence,
     Optional,
     Protocol,
+    Sequence,
     TextIO,
     Tuple,
     Union,
@@ -186,7 +186,13 @@ class MypyPluginsConfig:
             raise ValueError("Cannot specify both `--mypy-ini-file` and `--mypy-pyproject-toml-file`")
 
     @contextlib.contextmanager
-    def make_execution_path(self, cleanup_cache: Callable[[], None]) -> Iterator[Path]:
+    def make_execution_path(self, disable_cache: bool, files: Sequence[File]) -> Iterator[Path]:
+        """
+        Create an execution path, change working directory to it, yield for the test, and perform cleanup.
+
+        Any files that are added to the passed in sequence of files after this context manager yields
+        will also be cleaned up if the `disable_cache` is False.
+        """
         try:
             temp_dir = tempfile.TemporaryDirectory(prefix="pytest-mypy-", dir=self.root_directory)
 
@@ -196,10 +202,15 @@ class MypyPluginsConfig:
             ) from e
 
         try:
-            yield Path(temp_dir.name)
+            execution_path = Path(temp_dir.name)
+            with utils.cd(execution_path):
+                yield execution_path
         finally:
             temp_dir.cleanup()
-            cleanup_cache()
+            if not disable_cache:
+                for file in files:
+                    path = Path(file.path)
+                    self.remove_cache_files(path.with_suffix(""))
 
         assert not os.path.exists(temp_dir.name)
 
@@ -453,39 +464,32 @@ class YamlTestItem(pytest.Item):
         node.runtest()
 
     def _runtest(self, mypy_plugins_config: MypyPluginsConfig) -> None:
-        def cleanup_cache() -> None:
-            if not self.disable_cache:
-                for file in self.files:
-                    path = Path(file.path)
-                    mypy_plugins_config.remove_cache_files(path.with_suffix(""))
+        # extension point for derived packages
+        mypy_plugins_config.execute_extension_hook(self)
 
-        with mypy_plugins_config.make_execution_path(cleanup_cache) as execution_path:
-            # extension point for derived packages
-            mypy_plugins_config.execute_extension_hook(self)
+        with mypy_plugins_config.make_execution_path(self.disable_cache, self.files) as execution_path:
+            mypy_executor = MypyExecutor(
+                same_process=mypy_plugins_config.same_process,
+                execution_path=execution_path,
+                rootdir=mypy_plugins_config.pytest_rootdir,
+                environment_variables=self.environment_variables,
+                mypy_executable=mypy_plugins_config.mypy_executable,
+            )
 
-            with utils.cd(execution_path):
-                mypy_executor = MypyExecutor(
-                    same_process=mypy_plugins_config.same_process,
-                    execution_path=execution_path,
-                    rootdir=mypy_plugins_config.pytest_rootdir,
-                    environment_variables=self.environment_variables,
-                    mypy_executable=mypy_plugins_config.mypy_executable,
-                )
+            output_checker = OutputChecker(
+                expect_fail=self.expect_fail, execution_path=execution_path, expected_output=self.expected_output
+            )
 
-                output_checker = OutputChecker(
-                    expect_fail=self.expect_fail, execution_path=execution_path, expected_output=self.expected_output
-                )
-
-                Runner(
-                    files=self.files,
-                    main_file=execution_path / "main.py",
-                    config_file=mypy_plugins_config.prepare_config_file(execution_path, self.additional_mypy_config),
-                    disable_cache=self.disable_cache,
-                    mypy_executor=mypy_executor,
-                    output_checker=output_checker,
-                    test_only_local_stub=mypy_plugins_config.test_only_local_stub,
-                    incremental_cache_dir=mypy_plugins_config.incremental_cache_dir,
-                ).run()
+            Runner(
+                files=self.files,
+                main_file=execution_path / "main.py",
+                config_file=mypy_plugins_config.prepare_config_file(execution_path, self.additional_mypy_config),
+                disable_cache=self.disable_cache,
+                mypy_executor=mypy_executor,
+                output_checker=output_checker,
+                test_only_local_stub=mypy_plugins_config.test_only_local_stub,
+                incremental_cache_dir=mypy_plugins_config.incremental_cache_dir,
+            ).run()
 
     def repr_failure(
         self, excinfo: ExceptionInfo[BaseException], style: Optional["_TracebackStyle"] = None
