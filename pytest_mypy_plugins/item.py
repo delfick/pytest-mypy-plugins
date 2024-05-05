@@ -15,7 +15,11 @@ from typing import (
     Dict,
     Iterator,
     List,
+    Mapping,
+    MutableMapping,
+    MutableSequence,
     Optional,
+    Protocol,
     TextIO,
     Tuple,
     Union,
@@ -131,6 +135,36 @@ def run_mypy_typechecking(cmd_options: List[str], stdout: TextIO, stderr: TextIO
     return ReturnCodes.SUCCESS
 
 
+class ItemForHook(Protocol):
+    """
+    The guaranteed available options for a hook
+    """
+
+    expect_fail: bool
+    disable_cache: bool
+    additional_mypy_config: str
+
+    @property
+    def files(self) -> MutableSequence[File]:
+        pass
+
+    @property
+    def starting_lineno(self) -> int:
+        pass
+
+    @property
+    def expected_output(self) -> MutableSequence[OutputMatcher]:
+        pass
+
+    @property
+    def environment_variables(self) -> MutableMapping[str, Any]:
+        pass
+
+    @property
+    def parsed_test_data(self) -> Mapping[str, Any]:
+        pass
+
+
 @dataclasses.dataclass
 class MypyPluginsConfig:
     """
@@ -167,6 +201,14 @@ class MypyPluginsConfig:
             cleanup_cache()
 
         assert not os.path.exists(temp_dir.name)
+
+    def execute_extension_hook(self, node: ItemForHook) -> None:
+        if self.extension_hook is None:
+            return
+        module_name, func_name = self.extension_hook.rsplit(".", maxsplit=1)
+        module = importlib.import_module(module_name)
+        extension_hook = getattr(module, func_name)
+        extension_hook(node)
 
     def remove_cache_files(self, fpath_no_suffix: Path) -> None:
         cache_file = Path(self.incremental_cache_dir)
@@ -417,13 +459,6 @@ class YamlTestItem(pytest.Item):
 
         self.same_process = mypy_plugins_config.same_process
         self.test_only_local_stub = mypy_plugins_config.test_only_local_stub
-        self.extension_hook = mypy_plugins_config.extension_hook
-
-    def execute_extension_hook(self, extension_hook_fqname: str) -> None:
-        module_name, func_name = extension_hook_fqname.rsplit(".", maxsplit=1)
-        module = importlib.import_module(module_name)
-        extension_hook = getattr(module, func_name)
-        extension_hook(self)
 
     def runtest(self) -> None:
         def cleanup_cache() -> None:
@@ -438,8 +473,7 @@ class YamlTestItem(pytest.Item):
             rootdir = getattr(getattr(self.parent, "config", None), "rootdir", None)
 
             # extension point for derived packages
-            if self.extension_hook:
-                self.execute_extension_hook(self.extension_hook)
+            self.mypy_plugins_config.execute_extension_hook(self)
 
             with utils.cd(execution_path):
                 mypy_executor = MypyExecutor(

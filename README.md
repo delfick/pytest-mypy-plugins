@@ -209,6 +209,8 @@ mypy-tests:
   --mypy-extension-hook=MYPY_EXTENSION_HOOK
                         Fully qualified path to the extension hook function,
                         in case you need custom yaml keys. Has to be top-level
+                        Takes in one argument matching the Protocol
+                        `pytest_mypy_plugins.ItemForhook`
   --mypy-only-local-stub
                         mypy will ignore errors from site-packages
   --mypy-closed-schema
