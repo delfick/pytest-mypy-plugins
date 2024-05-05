@@ -1,4 +1,4 @@
-from pytest_mypy_plugins.item import ItemForHook
+from pytest_mypy_plugins import ItemForHook
 
 
 def hook(item: ItemForHook) -> None:

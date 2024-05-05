@@ -26,6 +26,12 @@ from decorator import contextmanager
 _rendering_env = jinja2.Environment()
 
 
+@dataclass
+class File:
+    path: str
+    content: str = ""
+
+
 @contextmanager
 def temp_environ() -> Iterator[None]:
     """Allow the ability to set os.environ temporarily"""

@@ -26,8 +26,8 @@ from mypy.fscache import FileSystemCache
 from mypy.main import process_options
 
 from . import configs, utils
-from .definition import File
 from .utils import (
+    File,
     OutputMatcher,
     TypecheckAssertionError,
     assert_expected_matched_actual,

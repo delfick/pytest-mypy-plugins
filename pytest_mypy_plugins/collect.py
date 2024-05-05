@@ -26,11 +26,11 @@ from _pytest.config.argparsing import Parser
 from _pytest.nodes import Node
 
 from . import utils
-from .definition import File, ItemDefinition
-from .item import MypyPluginsConfig
+from .definition import ItemDefinition
+from .scenario import MypyPluginsConfig
 
 # For backwards compatibility reasons this reference stays here
-File = File
+File = utils.File
 
 if TYPE_CHECKING:
     from _pytest._code.code import _TracebackStyle

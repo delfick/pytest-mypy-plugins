@@ -6,7 +6,6 @@ import platform
 import sys
 from collections import defaultdict
 from typing import (
-    TYPE_CHECKING,
     Any,
     Dict,
     Iterator,
@@ -21,15 +20,7 @@ import jsonschema
 import pytest
 
 from . import utils
-
-if TYPE_CHECKING:
-    from .item import MypyPluginsConfig
-
-
-@dataclasses.dataclass
-class File:
-    path: str
-    content: str = ""
+from .scenario import MypyPluginsConfig
 
 
 def validate_schema(data: List[Mapping[str, Any]], *, is_closed: bool = False) -> None:
@@ -44,9 +35,9 @@ def validate_schema(data: List[Mapping[str, Any]], *, is_closed: bool = False) -
     jsonschema.validate(instance=data, schema=schema)
 
 
-def _parse_test_files(files: List[Mapping[str, str]]) -> List[File]:
+def _parse_test_files(files: List[Mapping[str, str]]) -> List[utils.File]:
     return [
-        File(
+        utils.File(
             path=file["path"],
             **({} if "content" not in file else {"content": file["content"]}),
         )
@@ -95,7 +86,7 @@ class ItemDefinition:
 
     case: str
     main: str
-    files: MutableSequence[File]
+    files: MutableSequence[utils.File]
     starting_lineno: int
     parsed_test_data: Mapping[str, object]
     additional_properties: Mapping[str, object]
@@ -201,9 +192,9 @@ class ItemDefinition:
         return f"{test_name_prefix}{test_name_suffix}"
 
     @property
-    def main_file(self) -> File:
+    def main_file(self) -> utils.File:
         content = utils.render_template(template=self.main, data=self.item_params)
-        return File(path="main.py", content=content)
+        return utils.File(path="main.py", content=content)
 
     @property
     def expected_output(self) -> List[utils.OutputMatcher]:
@@ -217,7 +208,7 @@ class ItemDefinition:
         expected_output.extend(utils.extract_output_matchers_from_out(self.out, self.item_params, regex=self.regex))
         return expected_output
 
-    def runtest(self, mypy_plugins_config: "MypyPluginsConfig") -> None:
+    def runtest(self, mypy_plugins_config: MypyPluginsConfig) -> None:
         # Ensure main_file is available to the extension_hook
         self.files.insert(0, self.main_file)
 
