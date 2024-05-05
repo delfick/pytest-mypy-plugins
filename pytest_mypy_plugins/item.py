@@ -36,9 +36,9 @@ from mypy.main import process_options
 if TYPE_CHECKING:
     from _pytest._code.code import _TracebackStyle
 
-from pytest_mypy_plugins import configs, utils
-from pytest_mypy_plugins.collect import File, YamlTestFile
-from pytest_mypy_plugins.utils import (
+from . import configs, utils
+from .definition import File
+from .utils import (
     OutputMatcher,
     TypecheckAssertionError,
     assert_expected_matched_actual,
@@ -165,7 +165,7 @@ class ItemForHook(Protocol):
         pass
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class MypyPluginsConfig:
     """
     Data class representing the mypy plugins specific options from mypy config
@@ -425,7 +425,7 @@ class YamlTestItem(pytest.Item):
     def __init__(
         self,
         name: str,
-        parent: Optional[YamlTestFile] = None,
+        parent: Optional[pytest.Collector] = None,
         *,
         files: List[File],
         starting_lineno: int,
@@ -447,16 +447,11 @@ class YamlTestItem(pytest.Item):
         self.parsed_test_data = parsed_test_data
 
     def runtest(self) -> None:
-        mypy_plugins_config = MypyPluginsConfig(
-            same_process=self.config.option.mypy_same_process,
-            test_only_local_stub=self.config.option.mypy_only_local_stub,
-            root_directory=self.config.option.mypy_testing_base,
-            base_ini_fpath=utils.maybe_abspath(self.config.option.mypy_ini_file),
-            base_pyproject_toml_fpath=utils.maybe_abspath(self.config.option.mypy_pyproject_toml_file),
-            extension_hook=self.config.option.mypy_extension_hook,
-            incremental_cache_dir=os.path.join(self.config.option.mypy_testing_base, ".mypy_cache"),
-        )
+        node = pytest.Function.from_parent(self, name=self.name, callobj=self._runtest)
+        node.setup()
+        node.runtest()
 
+    def _runtest(self, mypy_plugins_config: MypyPluginsConfig) -> None:
         def cleanup_cache() -> None:
             if not self.disable_cache:
                 for file in self.files:
