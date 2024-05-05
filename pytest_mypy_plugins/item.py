@@ -1,3 +1,4 @@
+import dataclasses
 import importlib
 import io
 import os
@@ -12,7 +13,6 @@ import pytest
 from _pytest._code import ExceptionInfo
 from _pytest._code.code import ReprEntry, ReprFileLocation, TerminalRepr
 from _pytest._io import TerminalWriter
-from _pytest.config import Config
 from mypy import build
 from mypy.fscache import FileSystemCache
 from mypy.main import process_options
@@ -117,6 +117,20 @@ def run_mypy_typechecking(cmd_options: List[str], stdout: TextIO, stderr: TextIO
         return ReturnCodes.FAIL
 
     return ReturnCodes.SUCCESS
+
+
+@dataclasses.dataclass
+class MypyPluginsConfig:
+    """
+    Data class representing the mypy plugins specific options from mypy config
+    """
+
+    same_process: bool
+    test_only_local_stub: bool
+    root_directory: str
+    ini_file: Optional[str]
+    pyproject_toml_file: Optional[str]
+    extension_hook: Optional[str]
 
 
 class MypyExecutor:
@@ -242,7 +256,6 @@ class Runner:
         self,
         *,
         files: List[File],
-        config: Config,
         main_file: Path,
         config_file: Optional[str],
         disable_cache: bool,
@@ -252,7 +265,6 @@ class Runner:
         incremental_cache_dir: str,
     ) -> None:
         self.files = files
-        self.config = config
         self.main_file = main_file
         self.config_file = config_file
         self.mypy_executor = mypy_executor
@@ -302,7 +314,6 @@ class YamlTestItem(pytest.Item):
         self,
         name: str,
         parent: Optional[YamlTestFile] = None,
-        config: Optional[Config] = None,
         *,
         files: List[File],
         starting_lineno: int,
@@ -313,7 +324,7 @@ class YamlTestItem(pytest.Item):
         parsed_test_data: Dict[str, Any],
         expect_fail: bool,
     ) -> None:
-        super().__init__(name, parent, config)
+        super().__init__(name, parent)
         self.files = files
         self.environment_variables = environment_variables
         self.disable_cache = disable_cache
@@ -322,24 +333,39 @@ class YamlTestItem(pytest.Item):
         self.starting_lineno = starting_lineno
         self.additional_mypy_config = mypy_config
         self.parsed_test_data = parsed_test_data
-        self.same_process = self.config.option.mypy_same_process
-        self.test_only_local_stub = self.config.option.mypy_only_local_stub
+
+        mypy_plugins_config = MypyPluginsConfig(
+            same_process=self.config.option.mypy_same_process,
+            test_only_local_stub=self.config.option.mypy_only_local_stub,
+            root_directory=self.config.option.mypy_testing_base,
+            ini_file=self.config.option.mypy_ini_file,
+            pyproject_toml_file=self.config.option.mypy_pyproject_toml_file,
+            extension_hook=self.config.option.mypy_extension_hook,
+        )
+
+        self.same_process = mypy_plugins_config.same_process
+        self.test_only_local_stub = mypy_plugins_config.test_only_local_stub
+        self.extension_hook = mypy_plugins_config.extension_hook
 
         # config parameters
-        self.root_directory = self.config.option.mypy_testing_base
+        self.root_directory = mypy_plugins_config.root_directory
 
         # You cannot use both `.ini` and `pyproject.toml` files at the same time:
-        if self.config.option.mypy_ini_file and self.config.option.mypy_pyproject_toml_file:
+        if mypy_plugins_config.ini_file and mypy_plugins_config.pyproject_toml_file:
             raise ValueError("Cannot specify both `--mypy-ini-file` and `--mypy-pyproject-toml-file`")
 
-        if self.config.option.mypy_ini_file:
-            self.base_ini_fpath = os.path.abspath(self.config.option.mypy_ini_file)
+        self.base_ini_fpath: Optional[str]
+        if mypy_plugins_config.ini_file:
+            self.base_ini_fpath = os.path.abspath(mypy_plugins_config.ini_file)
         else:
             self.base_ini_fpath = None
-        if self.config.option.mypy_pyproject_toml_file:
-            self.base_pyproject_toml_fpath = os.path.abspath(self.config.option.mypy_pyproject_toml_file)
+
+        self.base_pyproject_toml_fpath: Optional[str]
+        if mypy_plugins_config.pyproject_toml_file:
+            self.base_pyproject_toml_fpath = os.path.abspath(mypy_plugins_config.pyproject_toml_file)
         else:
             self.base_pyproject_toml_fpath = None
+
         self.incremental_cache_dir = os.path.join(self.root_directory, ".mypy_cache")
 
     def remove_cache_files(self, fpath_no_suffix: Path) -> None:
@@ -363,8 +389,7 @@ class YamlTestItem(pytest.Item):
             ):
                 parent_dir.rmdir()
 
-    def execute_extension_hook(self) -> None:
-        extension_hook_fqname = self.config.option.mypy_extension_hook
+    def execute_extension_hook(self, extension_hook_fqname: str) -> None:
         module_name, func_name = extension_hook_fqname.rsplit(".", maxsplit=1)
         module = importlib.import_module(module_name)
         extension_hook = getattr(module, func_name)
@@ -385,11 +410,8 @@ class YamlTestItem(pytest.Item):
             rootdir = getattr(getattr(self.parent, "config", None), "rootdir", None)
 
             # extension point for derived packages
-            if (
-                hasattr(self.config.option, "mypy_extension_hook")
-                and self.config.option.mypy_extension_hook is not None
-            ):
-                self.execute_extension_hook()
+            if self.extension_hook:
+                self.execute_extension_hook(self.extension_hook)
 
             execution_path = Path(temp_dir.name)
             with utils.cd(execution_path):
@@ -407,7 +429,6 @@ class YamlTestItem(pytest.Item):
 
                 Runner(
                     files=self.files,
-                    config=self.config,
                     main_file=execution_path / "main.py",
                     config_file=self.prepare_config_file(execution_path),
                     disable_cache=self.disable_cache,
