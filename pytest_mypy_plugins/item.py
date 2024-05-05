@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
     Iterator,
     List,
     Mapping,
@@ -57,7 +56,7 @@ class TraceLastReprEntry(ReprEntry):
         return
 
 
-def make_files(rootdir: Path, files_to_create: Dict[str, str]) -> List[str]:
+def make_files(rootdir: Path, files_to_create: Mapping[str, str]) -> Sequence[str]:
     created_modules = []
     for rel_fpath, file_contents in files_to_create.items():
         fpath = rootdir / rel_fpath
@@ -91,9 +90,9 @@ class ReturnCodes:
     FATAL_ERROR = 2
 
 
-def run_mypy_typechecking(cmd_options: List[str], stdout: TextIO, stderr: TextIO) -> int:
+def run_mypy_typechecking(cmd_options: Sequence[str], stdout: TextIO, stderr: TextIO) -> int:
     fscache = FileSystemCache()
-    sources, options = process_options(cmd_options, fscache=fscache)
+    sources, options = process_options(list(cmd_options), fscache=fscache)
 
     error_messages = []
 
@@ -263,7 +262,7 @@ class MypyExecutor:
         same_process: bool,
         rootdir: Optional[Path],
         execution_path: Path,
-        environment_variables: Dict[str, Any],
+        environment_variables: MutableMapping[str, Any],
         mypy_executable: str,
     ) -> None:
         self.rootdir = rootdir
@@ -272,14 +271,14 @@ class MypyExecutor:
         self.mypy_executable = mypy_executable
         self.environment_variables = environment_variables
 
-    def execute(self, mypy_cmd_options: List[str]) -> Tuple[int, Tuple[str, str]]:
+    def execute(self, mypy_cmd_options: Sequence[str]) -> Tuple[int, Tuple[str, str]]:
         # Returns (returncode, (stdout, stderr))
         if self.same_process:
             return self._typecheck_in_same_process(mypy_cmd_options)
         else:
             return self._typecheck_in_new_subprocess(mypy_cmd_options)
 
-    def _typecheck_in_new_subprocess(self, mypy_cmd_options: List[Any]) -> Tuple[int, Tuple[str, str]]:
+    def _typecheck_in_new_subprocess(self, mypy_cmd_options: Sequence[Any]) -> Tuple[int, Tuple[str, str]]:
         # add current directory to path
         self._collect_python_path(self.rootdir)
         # adding proper MYPYPATH variable
@@ -299,7 +298,7 @@ class MypyExecutor:
         captured_stderr = completed.stderr.decode()
         return completed.returncode, (captured_stdout, captured_stderr)
 
-    def _typecheck_in_same_process(self, mypy_cmd_options: List[Any]) -> Tuple[int, Tuple[str, str]]:
+    def _typecheck_in_same_process(self, mypy_cmd_options: Sequence[Any]) -> Tuple[int, Tuple[str, str]]:
         return_code = -1
         with utils.temp_environ(), utils.temp_path(), utils.temp_sys_modules():
             # add custom environment variables
@@ -350,7 +349,7 @@ class MypyExecutor:
 
 
 class OutputChecker:
-    def __init__(self, expect_fail: bool, execution_path: Path, expected_output: List[OutputMatcher]) -> None:
+    def __init__(self, expect_fail: bool, execution_path: Path, expected_output: Sequence[OutputMatcher]) -> None:
         self.expect_fail = expect_fail
         self.execution_path = execution_path
         self.expected_output = expected_output
@@ -379,7 +378,7 @@ class Runner:
     def __init__(
         self,
         *,
-        files: List[File],
+        files: MutableSequence[File],
         main_file: Path,
         config_file: Optional[str],
         disable_cache: bool,
@@ -439,13 +438,13 @@ class YamlTestItem(pytest.Item):
         name: str,
         parent: Optional[pytest.Collector] = None,
         *,
-        files: List[File],
+        files: MutableSequence[File],
         starting_lineno: int,
-        expected_output: List[OutputMatcher],
-        environment_variables: Dict[str, Any],
+        expected_output: MutableSequence[OutputMatcher],
+        environment_variables: MutableMapping[str, Any],
         disable_cache: bool,
         mypy_config: str,
-        parsed_test_data: Dict[str, Any],
+        parsed_test_data: Mapping[str, Any],
         expect_fail: bool,
     ) -> None:
         super().__init__(name, parent)

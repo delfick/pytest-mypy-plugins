@@ -7,7 +7,17 @@ import sys
 from dataclasses import dataclass
 from itertools import zip_longest
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 import jinja2
 import regex
@@ -113,7 +123,7 @@ class TypecheckAssertionError(AssertionError):
         return self.error_message
 
 
-def remove_common_prefix(lines: List[str]) -> List[str]:
+def remove_common_prefix(lines: Sequence[str]) -> Sequence[str]:
     """Remove common directory prefix from all strings in a.
 
     This uses a naive string replace; it seems to work well enough. Also
@@ -183,7 +193,7 @@ def _add_aligned_message(s1: str, s2: str, error_message: str) -> str:
     return error_message
 
 
-def remove_empty_lines(lines: List[str]) -> List[str]:
+def remove_empty_lines(lines: Sequence[str]) -> Sequence[str]:
     filtered_lines = []
     for line in lines:
         if line:
@@ -191,7 +201,7 @@ def remove_empty_lines(lines: List[str]) -> List[str]:
     return filtered_lines
 
 
-def sorted_by_file_and_line(lines: List[str]) -> List[str]:
+def sorted_by_file_and_line(lines: Sequence[str]) -> Sequence[str]:
     def extract_parts_as_tuple(line: str) -> Tuple[str, int]:
         if len(line.split(":", maxsplit=2)) < 3:
             return "", 0
@@ -205,7 +215,7 @@ def sorted_by_file_and_line(lines: List[str]) -> List[str]:
     return sorted(lines, key=extract_parts_as_tuple)
 
 
-def assert_expected_matched_actual(expected: List[OutputMatcher], actual: List[str]) -> None:
+def assert_expected_matched_actual(expected: Sequence[OutputMatcher], actual: Sequence[str]) -> None:
     """Assert that two string arrays are equal.
 
     Display any differences in a human-readable form.
@@ -217,7 +227,7 @@ def assert_expected_matched_actual(expected: List[OutputMatcher], actual: List[s
     def format_matched_line(line: str, width: int = 100) -> str:
         return f" {line[:width]}..." if len(line) > width else f" {line}"
 
-    def format_error_lines(lines: List[str]) -> str:
+    def format_error_lines(lines: Sequence[str]) -> str:
         return "\n".join(lines) if lines else "  (empty)"
 
     expected = sorted(expected, key=lambda om: (om.fname, om.lnum))
@@ -286,7 +296,9 @@ def assert_expected_matched_actual(expected: List[OutputMatcher], actual: List[s
         )
 
 
-def extract_output_matchers_from_comments(fname: str, input_lines: List[str], regex: bool) -> List[OutputMatcher]:
+def extract_output_matchers_from_comments(
+    fname: str, input_lines: Sequence[str], regex: bool
+) -> Sequence[OutputMatcher]:
     """Transform comments such as '# E: message' or
     '# E:3: message' in input.
 
@@ -323,7 +335,7 @@ def extract_output_matchers_from_comments(fname: str, input_lines: List[str], re
     return matchers
 
 
-def extract_output_matchers_from_out(out: str, params: Mapping[str, Any], regex: bool) -> List[OutputMatcher]:
+def extract_output_matchers_from_out(out: str, params: Mapping[str, Any], regex: bool) -> Sequence[OutputMatcher]:
     """Transform output lines such as 'function:9: E: message'
 
     The result is a list of output matchers
@@ -365,7 +377,7 @@ def render_template(template: str, data: Mapping[str, Any]) -> str:
     return t.render({k: v if v is not None else "None" for k, v in data.items()})
 
 
-def get_func_first_lnum(attr: Callable[..., None]) -> Optional[Tuple[int, List[str]]]:
+def get_func_first_lnum(attr: Callable[..., None]) -> Optional[Tuple[int, Sequence[str]]]:
     lines, _ = inspect.getsourcelines(attr)
     for lnum, line in enumerate(lines):
         no_space_line = line.strip()
