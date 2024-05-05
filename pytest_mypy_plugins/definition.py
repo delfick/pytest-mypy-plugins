@@ -20,7 +20,7 @@ import jsonschema
 import pytest
 
 from . import utils
-from .scenario import MypyPluginsConfig
+from .scenario import MypyPluginsConfig, MypyPluginsScenario
 
 
 def validate_schema(data: List[Mapping[str, Any]], *, is_closed: bool = False) -> None:
@@ -208,21 +208,22 @@ class ItemDefinition:
         expected_output.extend(utils.extract_output_matchers_from_out(self.out, self.item_params, regex=self.regex))
         return expected_output
 
-    def runtest(self, mypy_plugins_config: MypyPluginsConfig) -> None:
+    def runtest(self, mypy_plugins_config: MypyPluginsConfig, mypy_plugins_scenario: MypyPluginsScenario) -> None:
+        scenario = mypy_plugins_scenario
+
         # Ensure main_file is available to the extension_hook
         self.files.insert(0, self.main_file)
 
         # extension point for derived packages
         mypy_plugins_config.execute_extension_hook(self)
 
-        with mypy_plugins_config.scenario() as scenario:
-            scenario.disable_cache = self.disable_cache
-            scenario.environment_variables = self.environment_variables
-            scenario.additional_mypy_config = self.additional_mypy_config
-            scenario.expect_fail = self.expect_fail
-            scenario.expected_output = self.expected_output
+        scenario.disable_cache = self.disable_cache
+        scenario.environment_variables = self.environment_variables
+        scenario.additional_mypy_config = self.additional_mypy_config
+        scenario.expect_fail = self.expect_fail
+        scenario.expected_output = self.expected_output
 
-            for file in self.files:
-                scenario.make_file(file)
+        for file in self.files:
+            scenario.make_file(file)
 
-            scenario.run_and_check_mypy("main.py")
+        scenario.run_and_check_mypy("main.py")

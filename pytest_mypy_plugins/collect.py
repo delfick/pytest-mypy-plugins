@@ -27,7 +27,7 @@ from _pytest.nodes import Node
 
 from . import utils
 from .definition import ItemDefinition
-from .scenario import MypyPluginsConfig
+from .scenario import MypyPluginsConfig, MypyPluginsScenario
 
 # For backwards compatibility reasons this reference stays here
 File = utils.File
@@ -145,6 +145,12 @@ def mypy_plugins_config(pytestconfig: pytest.Config) -> MypyPluginsConfig:
         mypy_executable=mypy_executable,
         pytest_rootdir=getattr(pytestconfig, "rootdir", None),
     )
+
+
+@pytest.fixture()
+def mypy_plugins_scenario(mypy_plugins_config: MypyPluginsConfig) -> Iterator[MypyPluginsScenario]:
+    with mypy_plugins_config.scenario() as scenario:
+        yield scenario
 
 
 def pytest_collect_file(file_path: pathlib.Path, parent: Node) -> Optional[pytest.Collector]:

@@ -1,4 +1,4 @@
-from .scenario import ItemForHook, MypyPluginsConfig
+from .scenario import ItemForHook, MypyPluginsConfig, MypyPluginsScenario
 from .utils import File, OutputMatcher
 
-__all__ = ["ItemForHook", "File", "OutputMatcher", "MypyPluginsConfig"]
+__all__ = ["ItemForHook", "File", "OutputMatcher", "MypyPluginsConfig", "MypyPluginsScenario"]
