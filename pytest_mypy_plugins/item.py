@@ -185,12 +185,9 @@ class MypyPluginsConfig:
             raise ValueError("Cannot specify both `--mypy-ini-file` and `--mypy-pyproject-toml-file`")
 
     @contextlib.contextmanager
-    def make_execution_path(self, disable_cache: bool, files: Sequence[File]) -> Iterator[Path]:
+    def scenario(self) -> Iterator["MypyPluginsScenario"]:
         """
         Create an execution path, change working directory to it, yield for the test, and perform cleanup.
-
-        Any files that are added to the passed in sequence of files after this context manager yields
-        will also be cleaned up if the `disable_cache` is False.
         """
         try:
             temp_dir = tempfile.TemporaryDirectory(prefix="pytest-mypy-", dir=self.root_directory)
@@ -200,16 +197,14 @@ class MypyPluginsConfig:
                 error_message=f"Testing base directory {self.root_directory} must exist and be writable"
             ) from e
 
+        execution_path = Path(temp_dir.name)
+        scenario = MypyPluginsScenario(execution_path=execution_path, mypy_plugins_config=self)
         try:
-            execution_path = Path(temp_dir.name)
             with utils.cd(execution_path):
-                yield execution_path
+                yield scenario
         finally:
             temp_dir.cleanup()
-            if not disable_cache:
-                for file in files:
-                    path = Path(file.path)
-                    self.remove_cache_files(path.with_suffix(""))
+            scenario.cleanup_cache()
 
         assert not os.path.exists(temp_dir.name)
 
@@ -374,62 +369,72 @@ class OutputChecker:
                 raise TypecheckAssertionError("Expected failure, but test passed")
 
 
-class Runner:
-    def __init__(
-        self,
-        *,
-        files: MutableSequence[File],
-        main_file: Path,
-        config_file: Optional[str],
-        disable_cache: bool,
-        mypy_executor: MypyExecutor,
-        output_checker: OutputChecker,
-        test_only_local_stub: bool,
-        incremental_cache_dir: str,
-    ) -> None:
-        self.files = files
-        self.main_file = main_file
-        self.config_file = config_file
-        self.mypy_executor = mypy_executor
-        self.disable_cache = disable_cache
-        self.output_checker = output_checker
-        self.test_only_local_stub = test_only_local_stub
-        self.incremental_cache_dir = incremental_cache_dir
+@dataclasses.dataclass
+class MypyPluginsScenario:
+    execution_path: Path
+    mypy_plugins_config: MypyPluginsConfig
 
-    def run(self) -> None:
-        # start from main.py
-        mypy_cmd_options = self._prepare_mypy_cmd_options()
-        mypy_cmd_options.append(str(self.main_file))
+    expect_fail: bool = False
+    disable_cache: bool = False
+    additional_mypy_config: str = ""
 
-        # make files
-        for file in self.files:
-            self._make_test_file(file)
+    files: MutableSequence[File] = dataclasses.field(default_factory=list)
+    expected_output: MutableSequence[OutputMatcher] = dataclasses.field(default_factory=list)
+    environment_variables: MutableMapping[str, Any] = dataclasses.field(default_factory=dict)
 
-        returncode, (stdout, stderr) = self.mypy_executor.execute(mypy_cmd_options)
-        self.output_checker.check(returncode, stdout, stderr)
+    def cleanup_cache(self) -> None:
+        if not self.disable_cache:
+            for file in self.files:
+                path = Path(file.path)
+                self.mypy_plugins_config.remove_cache_files(path.with_suffix(""))
 
-    def _make_test_file(self, file: File) -> None:
-        current_directory = Path.cwd()
-        fpath = current_directory / file.path
-        fpath.parent.mkdir(parents=True, exist_ok=True)
-        fpath.write_text(file.content)
+    def _prepare_mypy_cmd_options(self, main_file: Path) -> Sequence[str]:
+        config_file = self.mypy_plugins_config.prepare_config_file(self.execution_path, self.additional_mypy_config)
 
-    def _prepare_mypy_cmd_options(self) -> List[str]:
         mypy_cmd_options = [
             "--show-traceback",
             "--no-error-summary",
             "--no-pretty",
             "--hide-error-context",
         ]
-        if not self.test_only_local_stub:
-            mypy_cmd_options.append("--no-silence-site-packages")
-        if not self.disable_cache:
-            mypy_cmd_options.extend(["--cache-dir", self.incremental_cache_dir])
 
-        if self.config_file:
-            mypy_cmd_options.append(f"--config-file={self.config_file}")
+        if not self.mypy_plugins_config.test_only_local_stub:
+            mypy_cmd_options.append("--no-silence-site-packages")
+
+        if not self.disable_cache:
+            mypy_cmd_options.extend(["--cache-dir", self.mypy_plugins_config.incremental_cache_dir])
+
+        if config_file:
+            mypy_cmd_options.append(f"--config-file={config_file}")
+
+        mypy_cmd_options.append(str(main_file))
 
         return mypy_cmd_options
+
+    def run_and_check_mypy(self, main_file: str) -> None:
+        mypy_executor = MypyExecutor(
+            same_process=self.mypy_plugins_config.same_process,
+            execution_path=self.execution_path,
+            rootdir=self.mypy_plugins_config.pytest_rootdir,
+            environment_variables=self.environment_variables,
+            mypy_executable=self.mypy_plugins_config.mypy_executable,
+        )
+
+        output_checker = OutputChecker(
+            expect_fail=self.expect_fail, execution_path=self.execution_path, expected_output=self.expected_output
+        )
+
+        mypy_cmd_options = self._prepare_mypy_cmd_options(self.execution_path / main_file)
+
+        returncode, (stdout, stderr) = mypy_executor.execute(mypy_cmd_options)
+        output_checker.check(returncode, stdout, stderr)
+
+    def make_file(self, file: File) -> None:
+        self.files.append(file)
+        current_directory = Path.cwd()
+        fpath = current_directory / file.path
+        fpath.parent.mkdir(parents=True, exist_ok=True)
+        fpath.write_text(file.content)
 
 
 class YamlTestItem(pytest.Item):
@@ -466,29 +471,17 @@ class YamlTestItem(pytest.Item):
         # extension point for derived packages
         mypy_plugins_config.execute_extension_hook(self)
 
-        with mypy_plugins_config.make_execution_path(self.disable_cache, self.files) as execution_path:
-            mypy_executor = MypyExecutor(
-                same_process=mypy_plugins_config.same_process,
-                execution_path=execution_path,
-                rootdir=mypy_plugins_config.pytest_rootdir,
-                environment_variables=self.environment_variables,
-                mypy_executable=mypy_plugins_config.mypy_executable,
-            )
+        with mypy_plugins_config.scenario() as scenario:
+            scenario.disable_cache = self.disable_cache
+            scenario.environment_variables = self.environment_variables
+            scenario.additional_mypy_config = self.additional_mypy_config
+            scenario.expect_fail = self.expect_fail
+            scenario.expected_output = self.expected_output
 
-            output_checker = OutputChecker(
-                expect_fail=self.expect_fail, execution_path=execution_path, expected_output=self.expected_output
-            )
+            for file in self.files:
+                scenario.make_file(file)
 
-            Runner(
-                files=self.files,
-                main_file=execution_path / "main.py",
-                config_file=mypy_plugins_config.prepare_config_file(execution_path, self.additional_mypy_config),
-                disable_cache=self.disable_cache,
-                mypy_executor=mypy_executor,
-                output_checker=output_checker,
-                test_only_local_stub=mypy_plugins_config.test_only_local_stub,
-                incremental_cache_dir=mypy_plugins_config.incremental_cache_dir,
-            ).run()
+            scenario.run_and_check_mypy("main.py")
 
     def repr_failure(
         self, excinfo: ExceptionInfo[BaseException], style: Optional["_TracebackStyle"] = None
