@@ -220,6 +220,23 @@ mypy-tests:
 
 ```
 
+To type check an extension hook would look like:
+
+```python
+from typing import TYPE_CHECKING
+
+from pytest_mypy_plugins import ExtensionHook, ItemForHook
+
+
+def hook(item: ItemForHook) -> None:
+    # perform hook here
+    pass
+
+
+if TYPE_CHECKING:
+    _h: ExtensionHook = hook
+```
+
 ## Further reading
 
 - [Testing mypy stubs, plugins, and types](https://sobolevn.me/2019/08/testing-mypy-types)

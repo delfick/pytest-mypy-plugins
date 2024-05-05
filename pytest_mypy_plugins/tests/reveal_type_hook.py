@@ -1,4 +1,6 @@
-from pytest_mypy_plugins import ItemForHook
+from typing import TYPE_CHECKING
+
+from pytest_mypy_plugins import ExtensionHook, ItemForHook
 
 
 def hook(item: ItemForHook) -> None:
@@ -8,3 +10,7 @@ def hook(item: ItemForHook) -> None:
         for file in item.files:
             if file.path.endswith("main.py"):
                 file.content = f"reveal_type({obj_to_reveal})"
+
+
+if TYPE_CHECKING:
+    _h: ExtensionHook = hook

@@ -113,6 +113,11 @@ class ItemForHook(Protocol):
         pass
 
 
+class ExtensionHook(Protocol):
+    def __call__(self, item: ItemForHook) -> None:
+        ...
+
+
 @dataclasses.dataclass(frozen=True)
 class MypyPluginsConfig:
     """
