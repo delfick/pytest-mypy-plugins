@@ -446,6 +446,7 @@ class YamlTestItem(pytest.Item):
         self.additional_mypy_config = mypy_config
         self.parsed_test_data = parsed_test_data
 
+    def runtest(self) -> None:
         mypy_plugins_config = MypyPluginsConfig(
             same_process=self.config.option.mypy_same_process,
             test_only_local_stub=self.config.option.mypy_only_local_stub,
@@ -455,29 +456,24 @@ class YamlTestItem(pytest.Item):
             extension_hook=self.config.option.mypy_extension_hook,
             incremental_cache_dir=os.path.join(self.config.option.mypy_testing_base, ".mypy_cache"),
         )
-        self.mypy_plugins_config = mypy_plugins_config
 
-        self.same_process = mypy_plugins_config.same_process
-        self.test_only_local_stub = mypy_plugins_config.test_only_local_stub
-
-    def runtest(self) -> None:
         def cleanup_cache() -> None:
             if not self.disable_cache:
                 for file in self.files:
                     path = Path(file.path)
-                    self.mypy_plugins_config.remove_cache_files(path.with_suffix(""))
+                    mypy_plugins_config.remove_cache_files(path.with_suffix(""))
 
-        with self.mypy_plugins_config.make_execution_path(cleanup_cache) as execution_path:
+        with mypy_plugins_config.make_execution_path(cleanup_cache) as execution_path:
             mypy_executable = shutil.which("mypy")
             assert mypy_executable is not None, "mypy executable is not found"
             rootdir = getattr(getattr(self.parent, "config", None), "rootdir", None)
 
             # extension point for derived packages
-            self.mypy_plugins_config.execute_extension_hook(self)
+            mypy_plugins_config.execute_extension_hook(self)
 
             with utils.cd(execution_path):
                 mypy_executor = MypyExecutor(
-                    same_process=self.same_process,
+                    same_process=mypy_plugins_config.same_process,
                     execution_path=execution_path,
                     rootdir=rootdir,
                     environment_variables=self.environment_variables,
@@ -491,14 +487,12 @@ class YamlTestItem(pytest.Item):
                 Runner(
                     files=self.files,
                     main_file=execution_path / "main.py",
-                    config_file=self.mypy_plugins_config.prepare_config_file(
-                        execution_path, self.additional_mypy_config
-                    ),
+                    config_file=mypy_plugins_config.prepare_config_file(execution_path, self.additional_mypy_config),
                     disable_cache=self.disable_cache,
                     mypy_executor=mypy_executor,
                     output_checker=output_checker,
-                    test_only_local_stub=self.test_only_local_stub,
-                    incremental_cache_dir=self.mypy_plugins_config.incremental_cache_dir,
+                    test_only_local_stub=mypy_plugins_config.test_only_local_stub,
+                    incremental_cache_dir=mypy_plugins_config.incremental_cache_dir,
                 ).run()
 
     def repr_failure(
