@@ -8,9 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import (
-    TYPE_CHECKING,
     Any,
-    Callable,
     Iterator,
     List,
     Mapping,
@@ -21,13 +19,8 @@ from typing import (
     Sequence,
     TextIO,
     Tuple,
-    Union,
 )
 
-import pytest
-from _pytest._code import ExceptionInfo
-from _pytest._code.code import ReprEntry, ReprFileLocation, TerminalRepr
-from _pytest._io import TerminalWriter
 from mypy import build
 from mypy.fscache import FileSystemCache
 from mypy.main import process_options
@@ -39,21 +32,6 @@ from .utils import (
     TypecheckAssertionError,
     assert_expected_matched_actual,
 )
-
-if TYPE_CHECKING:
-    from _pytest._code.code import _TracebackStyle
-
-
-class TraceLastReprEntry(ReprEntry):
-    def toterminal(self, tw: TerminalWriter) -> None:
-        if not self.reprfileloc:
-            return
-
-        self.reprfileloc.toterminal(tw)
-        for line in self.lines:
-            red = line.startswith("E   ")
-            tw.line(line, bold=True, red=red)
-        return
 
 
 class ReturnCodes:
@@ -420,44 +398,3 @@ class MypyPluginsScenario:
         fpath = current_directory / file.path
         fpath.parent.mkdir(parents=True, exist_ok=True)
         fpath.write_text(file.content)
-
-
-class YamlTestItem(pytest.Function):
-    def __init__(
-        self,
-        name: str,
-        parent: pytest.Collector,
-        *,
-        callobj: Callable[..., None],
-        starting_lineno: int,
-        originalname: Optional[str] = None,
-    ) -> None:
-        super().__init__(name, parent, callobj=callobj, originalname=originalname)
-        self.starting_lineno = starting_lineno
-
-    def repr_failure(
-        self, excinfo: ExceptionInfo[BaseException], style: Optional["_TracebackStyle"] = None
-    ) -> Union[str, TerminalRepr]:
-        if isinstance(excinfo.value, SystemExit):
-            # We assume that before doing exit() (which raises SystemExit) we've printed
-            # enough context about what happened so that a stack trace is not useful.
-            # In particular, uncaught exceptions during semantic analysis or type checking
-            # call exit() and they already print out a stack trace.
-            return excinfo.exconly(tryshort=True)
-        elif isinstance(excinfo.value, TypecheckAssertionError):
-            # with traceback removed
-            exception_repr = excinfo.getrepr(style="short")
-            exception_repr.reprcrash.message = ""  # type: ignore
-            repr_file_location = ReprFileLocation(
-                path=str(self.path), lineno=self.starting_lineno + excinfo.value.lineno, message=""
-            )
-            repr_tb_entry = TraceLastReprEntry(
-                exception_repr.reprtraceback.reprentries[-1].lines[1:], None, None, repr_file_location, "short"
-            )
-            exception_repr.reprtraceback.reprentries = [repr_tb_entry]
-            return exception_repr
-        else:
-            return super(pytest.Function, self).repr_failure(excinfo, style="native")
-
-    def reportinfo(self) -> Tuple[Union[Path, str], Optional[int], str]:
-        return self.path, None, self.name

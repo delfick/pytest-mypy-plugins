@@ -2,19 +2,50 @@ import os
 import pathlib
 import shutil
 import tempfile
-from typing import Any, Dict, Hashable, Iterator, List, Mapping, Optional
+from pathlib import Path
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Hashable,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+)
 
 import pytest
 import yaml
+from _pytest._code import ExceptionInfo
+from _pytest._code.code import ReprEntry, ReprFileLocation, TerminalRepr
+from _pytest._io import TerminalWriter
 from _pytest.config.argparsing import Parser
 from _pytest.nodes import Node
 
 from . import utils
 from .definition import File, ItemDefinition
-from .item import MypyPluginsConfig, YamlTestItem
+from .item import MypyPluginsConfig
 
 # For backwards compatibility reasons this reference stays here
 File = File
+
+if TYPE_CHECKING:
+    from _pytest._code.code import _TracebackStyle
+
+
+class TraceLastReprEntry(ReprEntry):
+    def toterminal(self, tw: TerminalWriter) -> None:
+        if not self.reprfileloc:
+            return
+
+        self.reprfileloc.toterminal(tw)
+        for line in self.lines:
+            red = line.startswith("E   ")
+            tw.line(line, bold=True, red=red)
+        return
 
 
 class SafeLineLoader(yaml.SafeLoader):
@@ -27,6 +58,47 @@ class SafeLineLoader(yaml.SafeLoader):
                 starting_line = title_node.start_mark.line + 1
         mapping["__line__"] = starting_line
         return mapping
+
+
+class YamlTestItem(pytest.Function):
+    def __init__(
+        self,
+        name: str,
+        parent: pytest.Collector,
+        *,
+        callobj: Callable[..., None],
+        starting_lineno: int,
+        originalname: Optional[str] = None,
+    ) -> None:
+        super().__init__(name, parent, callobj=callobj, originalname=originalname)
+        self.starting_lineno = starting_lineno
+
+    def repr_failure(
+        self, excinfo: ExceptionInfo[BaseException], style: Optional["_TracebackStyle"] = None
+    ) -> Union[str, TerminalRepr]:
+        if isinstance(excinfo.value, SystemExit):
+            # We assume that before doing exit() (which raises SystemExit) we've printed
+            # enough context about what happened so that a stack trace is not useful.
+            # In particular, uncaught exceptions during semantic analysis or type checking
+            # call exit() and they already print out a stack trace.
+            return excinfo.exconly(tryshort=True)
+        elif isinstance(excinfo.value, utils.TypecheckAssertionError):
+            # with traceback removed
+            exception_repr = excinfo.getrepr(style="short")
+            exception_repr.reprcrash.message = ""  # type: ignore
+            repr_file_location = ReprFileLocation(
+                path=str(self.path), lineno=self.starting_lineno + excinfo.value.lineno, message=""
+            )
+            repr_tb_entry = TraceLastReprEntry(
+                exception_repr.reprtraceback.reprentries[-1].lines[1:], None, None, repr_file_location, "short"
+            )
+            exception_repr.reprtraceback.reprentries = [repr_tb_entry]
+            return exception_repr
+        else:
+            return super(pytest.Function, self).repr_failure(excinfo, style="native")
+
+    def reportinfo(self) -> Tuple[Union[Path, str], Optional[int], str]:
+        return self.path, None, self.name
 
 
 class YamlTestFile(pytest.File):
