@@ -189,6 +189,19 @@ class MypyPluginsConfig:
             ):
                 parent_dir.rmdir()
 
+    def prepare_config_file(self, execution_path: Path, additional_mypy_config: str) -> Optional[str]:
+        # Merge (`self.base_ini_fpath` or `base_pyproject_toml_fpath`)
+        # and `additional_mypy_config`
+        # into one file and copy to the typechecking folder:
+        if self.base_pyproject_toml_fpath:
+            return configs.join_toml_configs(self.base_pyproject_toml_fpath, additional_mypy_config, execution_path)
+        elif self.base_ini_fpath or additional_mypy_config:
+            # We might have `self.base_ini_fpath` set as well.
+            # Or this might be a legacy case: only `mypy_config:` is set in the `yaml` test case.
+            # This means that no real file is provided.
+            return configs.join_ini_configs(self.base_ini_fpath, additional_mypy_config, execution_path)
+        return None
+
 
 class MypyExecutor:
     def __init__(
@@ -405,8 +418,6 @@ class YamlTestItem(pytest.Item):
         self.same_process = mypy_plugins_config.same_process
         self.test_only_local_stub = mypy_plugins_config.test_only_local_stub
         self.extension_hook = mypy_plugins_config.extension_hook
-        self.base_ini_fpath = mypy_plugins_config.base_ini_fpath
-        self.base_pyproject_toml_fpath = mypy_plugins_config.base_pyproject_toml_fpath
 
     def execute_extension_hook(self, extension_hook_fqname: str) -> None:
         module_name, func_name = extension_hook_fqname.rsplit(".", maxsplit=1)
@@ -446,28 +457,15 @@ class YamlTestItem(pytest.Item):
                 Runner(
                     files=self.files,
                     main_file=execution_path / "main.py",
-                    config_file=self.prepare_config_file(execution_path),
+                    config_file=self.mypy_plugins_config.prepare_config_file(
+                        execution_path, self.additional_mypy_config
+                    ),
                     disable_cache=self.disable_cache,
                     mypy_executor=mypy_executor,
                     output_checker=output_checker,
                     test_only_local_stub=self.test_only_local_stub,
                     incremental_cache_dir=self.mypy_plugins_config.incremental_cache_dir,
                 ).run()
-
-    def prepare_config_file(self, execution_path: Path) -> Optional[str]:
-        # Merge (`self.base_ini_fpath` or `base_pyproject_toml_fpath`)
-        # and `self.additional_mypy_config`
-        # into one file and copy to the typechecking folder:
-        if self.base_pyproject_toml_fpath:
-            return configs.join_toml_configs(
-                self.base_pyproject_toml_fpath, self.additional_mypy_config, execution_path
-            )
-        elif self.base_ini_fpath or self.additional_mypy_config:
-            # We might have `self.base_ini_fpath` set as well.
-            # Or this might be a legacy case: only `mypy_config:` is set in the `yaml` test case.
-            # This means that no real file is provided.
-            return configs.join_ini_configs(self.base_ini_fpath, self.additional_mypy_config, execution_path)
-        return None
 
     def repr_failure(
         self, excinfo: ExceptionInfo[BaseException], style: Optional["_TracebackStyle"] = None
