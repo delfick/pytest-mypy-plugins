@@ -56,14 +56,6 @@ def temp_sys_modules() -> Iterator[None]:
         sys.modules = sys_modules.copy()
 
 
-def fname_to_module(fpath: Path, root_path: Path) -> Optional[str]:
-    try:
-        relpath = fpath.relative_to(root_path).with_suffix("")
-        return str(relpath).replace(os.sep, ".")
-    except ValueError:
-        return None
-
-
 def maybe_abspath(fpath: Optional[str]) -> Optional[str]:
     if fpath is None:
         return None

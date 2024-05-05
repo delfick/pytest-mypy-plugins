@@ -31,17 +31,16 @@ from mypy import build
 from mypy.fscache import FileSystemCache
 from mypy.main import process_options
 
-if TYPE_CHECKING:
-    from _pytest._code.code import _TracebackStyle
-
 from . import configs, utils
 from .definition import File
 from .utils import (
     OutputMatcher,
     TypecheckAssertionError,
     assert_expected_matched_actual,
-    fname_to_module,
 )
+
+if TYPE_CHECKING:
+    from _pytest._code.code import _TracebackStyle
 
 
 class TraceLastReprEntry(ReprEntry):
@@ -56,41 +55,13 @@ class TraceLastReprEntry(ReprEntry):
         return
 
 
-def make_files(rootdir: Path, files_to_create: Mapping[str, str]) -> Sequence[str]:
-    created_modules = []
-    for rel_fpath, file_contents in files_to_create.items():
-        fpath = rootdir / rel_fpath
-        fpath.parent.mkdir(parents=True, exist_ok=True)
-        fpath.write_text(file_contents)
-
-        created_module = fname_to_module(fpath, root_path=rootdir)
-        if created_module:
-            created_modules.append(created_module)
-    return created_modules
-
-
-def replace_fpath_with_module_name(line: str, rootdir: Path) -> str:
-    if ":" not in line:
-        return line
-    out_fpath, res_line = line.split(":", 1)
-    line = os.path.relpath(out_fpath, start=rootdir) + ":" + res_line
-    return line.strip().replace(".py:", ":")
-
-
-def maybe_to_abspath(rel_or_abs: str, rootdir: Optional[Path]) -> str:
-    rel_or_abs = os.path.expandvars(rel_or_abs)
-    if rootdir is None or os.path.isabs(rel_or_abs):
-        return rel_or_abs
-    return str(rootdir / rel_or_abs)
-
-
 class ReturnCodes:
     SUCCESS = 0
     FAIL = 1
     FATAL_ERROR = 2
 
 
-def run_mypy_typechecking(cmd_options: Sequence[str], stdout: TextIO, stderr: TextIO) -> int:
+def _run_mypy_typechecking(cmd_options: Sequence[str], stdout: TextIO, stderr: TextIO) -> int:
     fscache = FileSystemCache()
     sources, options = process_options(list(cmd_options), fscache=fscache)
 
@@ -307,7 +278,7 @@ class MypyExecutor:
             stderr = io.StringIO()
 
             with stdout, stderr:
-                return_code = run_mypy_typechecking(mypy_cmd_options, stdout=stdout, stderr=stderr)
+                return_code = _run_mypy_typechecking(mypy_cmd_options, stdout=stdout, stderr=stderr)
                 stdout_value = stdout.getvalue()
                 stderr_value = stderr.getvalue()
 
@@ -322,7 +293,7 @@ class MypyExecutor:
         python_path_parts.append(str(self.execution_path))
         python_path_key = self.environment_variables.get("PYTHONPATH")
         if python_path_key:
-            python_path_parts.append(maybe_to_abspath(python_path_key, rootdir))
+            python_path_parts.append(self._maybe_to_abspath(python_path_key, rootdir))
             python_path_parts.append(python_path_key)
 
         self.environment_variables["PYTHONPATH"] = ":".join(python_path_parts)
@@ -335,12 +306,18 @@ class MypyExecutor:
             mypy_path_parts.append(existing_mypy_path)
         mypy_path_key = self.environment_variables.get("MYPYPATH")
         if mypy_path_key:
-            mypy_path_parts.append(maybe_to_abspath(mypy_path_key, rootdir))
+            mypy_path_parts.append(self._maybe_to_abspath(mypy_path_key, rootdir))
             mypy_path_parts.append(mypy_path_key)
         if rootdir:
             mypy_path_parts.append(str(rootdir))
 
         self.environment_variables["MYPYPATH"] = ":".join(mypy_path_parts)
+
+    def _maybe_to_abspath(self, rel_or_abs: str, rootdir: Optional[Path]) -> str:
+        rel_or_abs = os.path.expandvars(rel_or_abs)
+        if rootdir is None or os.path.isabs(rel_or_abs):
+            return rel_or_abs
+        return str(rootdir / rel_or_abs)
 
 
 class OutputChecker:
@@ -357,7 +334,7 @@ class OutputChecker:
 
         output_lines = []
         for line in mypy_output.splitlines():
-            output_line = replace_fpath_with_module_name(line, rootdir=self.execution_path)
+            output_line = self._replace_fpath_with_module_name(line, rootdir=self.execution_path)
             output_lines.append(output_line)
         try:
             assert_expected_matched_actual(expected=self.expected_output, actual=output_lines)
@@ -367,6 +344,13 @@ class OutputChecker:
         else:
             if self.expect_fail:
                 raise TypecheckAssertionError("Expected failure, but test passed")
+
+    def _replace_fpath_with_module_name(self, line: str, rootdir: Path) -> str:
+        if ":" not in line:
+            return line
+        out_fpath, res_line = line.split(":", 1)
+        line = os.path.relpath(out_fpath, start=rootdir) + ":" + res_line
+        return line.strip().replace(".py:", ":")
 
 
 @dataclasses.dataclass
