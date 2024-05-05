@@ -11,7 +11,7 @@ from _pytest.nodes import Node
 
 from . import utils
 from .definition import File, ItemDefinition
-from .item import MypyPluginsConfig
+from .item import MypyPluginsConfig, YamlTestItem
 
 # For backwards compatibility reasons this reference stays here
 File = File
@@ -48,7 +48,13 @@ class YamlTestFile(pytest.File):
         parsed_file = self.read_yaml_file(self.path)
 
         for test in ItemDefinition.from_yaml(parsed_file, is_closed=is_closed):
-            yield test.pytest_item(self)
+            yield YamlTestItem.from_parent(
+                self,
+                name=test.test_name,
+                callobj=test.runtest,
+                originalname=test.case,
+                starting_lineno=test.starting_lineno,
+            )
 
 
 @pytest.fixture(scope="session")

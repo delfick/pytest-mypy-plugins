@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Iterator,
     List,
     Mapping,
@@ -421,51 +422,18 @@ class MypyPluginsScenario:
         fpath.write_text(file.content)
 
 
-class YamlTestItem(pytest.Item):
+class YamlTestItem(pytest.Function):
     def __init__(
         self,
         name: str,
-        parent: Optional[pytest.Collector] = None,
+        parent: pytest.Collector,
         *,
-        files: MutableSequence[File],
+        callobj: Callable[..., None],
         starting_lineno: int,
-        expected_output: MutableSequence[OutputMatcher],
-        environment_variables: MutableMapping[str, Any],
-        disable_cache: bool,
-        mypy_config: str,
-        parsed_test_data: Mapping[str, Any],
-        expect_fail: bool,
+        originalname: Optional[str] = None,
     ) -> None:
-        super().__init__(name, parent)
-        self.files = files
-        self.environment_variables = environment_variables
-        self.disable_cache = disable_cache
-        self.expect_fail = expect_fail
-        self.expected_output = expected_output
+        super().__init__(name, parent, callobj=callobj, originalname=originalname)
         self.starting_lineno = starting_lineno
-        self.additional_mypy_config = mypy_config
-        self.parsed_test_data = parsed_test_data
-
-    def runtest(self) -> None:
-        node = pytest.Function.from_parent(self, name=self.name, callobj=self._runtest)
-        node.setup()
-        node.runtest()
-
-    def _runtest(self, mypy_plugins_config: MypyPluginsConfig) -> None:
-        # extension point for derived packages
-        mypy_plugins_config.execute_extension_hook(self)
-
-        with mypy_plugins_config.scenario() as scenario:
-            scenario.disable_cache = self.disable_cache
-            scenario.environment_variables = self.environment_variables
-            scenario.additional_mypy_config = self.additional_mypy_config
-            scenario.expect_fail = self.expect_fail
-            scenario.expected_output = self.expected_output
-
-            for file in self.files:
-                scenario.make_file(file)
-
-            scenario.run_and_check_mypy("main.py")
 
     def repr_failure(
         self, excinfo: ExceptionInfo[BaseException], style: Optional["_TracebackStyle"] = None
@@ -489,7 +457,7 @@ class YamlTestItem(pytest.Item):
             exception_repr.reprtraceback.reprentries = [repr_tb_entry]
             return exception_repr
         else:
-            return super().repr_failure(excinfo, style="native")
+            return super(pytest.Function, self).repr_failure(excinfo, style="native")
 
     def reportinfo(self) -> Tuple[Union[Path, str], Optional[int], str]:
         return self.path, None, self.name

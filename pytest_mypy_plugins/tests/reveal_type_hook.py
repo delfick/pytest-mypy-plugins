@@ -1,7 +1,7 @@
-from pytest_mypy_plugins.item import YamlTestItem
+from pytest_mypy_plugins.item import ItemForHook
 
 
-def hook(item: YamlTestItem) -> None:
+def hook(item: ItemForHook) -> None:
     parsed_test_data = item.parsed_test_data
     obj_to_reveal = parsed_test_data.get("reveal_type")
     if obj_to_reveal:

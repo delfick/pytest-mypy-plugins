@@ -5,12 +5,25 @@ import pathlib
 import platform
 import sys
 from collections import defaultdict
-from typing import Any, Dict, Iterator, List, Mapping, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    Iterator,
+    List,
+    Mapping,
+    MutableMapping,
+    MutableSequence,
+    Union,
+)
 
 import jsonschema
 import pytest
 
 from . import utils
+
+if TYPE_CHECKING:
+    from .item import MypyPluginsConfig
 
 
 @dataclasses.dataclass
@@ -82,11 +95,11 @@ class ItemDefinition:
 
     case: str
     main: str
-    files: List[File]
-    raw_test: Mapping[str, object]
+    files: MutableSequence[File]
     starting_lineno: int
+    parsed_test_data: Mapping[str, object]
     additional_properties: Mapping[str, object]
-    extra_environment_variables: Mapping[str, object]
+    environment_variables: MutableMapping[str, object]
 
     out: str = ""
     skip: Union[bool, str] = False
@@ -95,8 +108,9 @@ class ItemDefinition:
     expect_fail: bool = False
     disable_cache: bool = False
 
-    # This is set when `from_yaml` returns all the parametrized, non skipped tests
+    # These are set when `from_yaml` returns all the parametrized, non skipped tests
     item_params: Mapping[str, object] = dataclasses.field(default_factory=dict, init=False)
+    additional_mypy_config: str = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
         if not self.case.isidentifier():
@@ -112,7 +126,7 @@ class ItemDefinition:
 
             additional_properties: Dict[str, object] = {}
             kwargs: Dict[str, Any] = {
-                "raw_test": _raw_item,
+                "parsed_test_data": _raw_item,
                 "additional_properties": additional_properties,
             }
 
@@ -134,7 +148,7 @@ class ItemDefinition:
             env = raw_item.pop("env", None)
             if not isinstance(env, list):
                 env = []
-            kwargs["extra_environment_variables"] = _parse_environment_variables(env)
+            kwargs["environment_variables"] = _parse_environment_variables(env)
 
             # Get the parametrized options
             parametrized = raw_item.pop("parametrized", None)
@@ -151,11 +165,18 @@ class ItemDefinition:
 
             nxt = cls(**kwargs)
             for params in parametrized:
-                clone = dataclasses.replace(nxt)
-                clone.item_params = params
+                clone = nxt.clone(params)
 
                 if not clone._skipped:
                     yield clone
+
+    def clone(self, item_params: Mapping[str, object]) -> "ItemDefinition":
+        clone = dataclasses.replace(self)
+        clone.files = list(clone.files)
+        clone.environment_variables = dict(clone.environment_variables)
+        clone.item_params = item_params
+        clone.additional_mypy_config = utils.render_template(template=self.mypy_config, data=item_params)
+        return clone
 
     @property
     def _skipped(self) -> bool:
@@ -185,13 +206,9 @@ class ItemDefinition:
         return File(path="main.py", content=content)
 
     @property
-    def all_files(self) -> List[File]:
-        return [self.main_file] + self.files
-
-    @property
     def expected_output(self) -> List[utils.OutputMatcher]:
         expected_output: List[utils.OutputMatcher] = []
-        for test_file in self.all_files:
+        for test_file in self.files:
             output_lines = utils.extract_output_matchers_from_comments(
                 test_file.path, test_file.content.split("\n"), regex=self.regex
             )
@@ -200,22 +217,21 @@ class ItemDefinition:
         expected_output.extend(utils.extract_output_matchers_from_out(self.out, self.item_params, regex=self.regex))
         return expected_output
 
-    @property
-    def additional_mypy_config(self) -> str:
-        return utils.render_template(template=self.mypy_config, data=self.item_params)
+    def runtest(self, mypy_plugins_config: "MypyPluginsConfig") -> None:
+        # Ensure main_file is available to the extension_hook
+        self.files.insert(0, self.main_file)
 
-    def pytest_item(self, parent: pytest.Collector) -> pytest.Item:
-        from pytest_mypy_plugins.item import YamlTestItem
+        # extension point for derived packages
+        mypy_plugins_config.execute_extension_hook(self)
 
-        return YamlTestItem.from_parent(
-            parent,
-            name=self.test_name,
-            files=self.all_files,
-            starting_lineno=self.starting_lineno,
-            environment_variables=self.extra_environment_variables,
-            disable_cache=self.disable_cache,
-            expected_output=self.expected_output,
-            parsed_test_data=self.raw_test,
-            mypy_config=self.additional_mypy_config,
-            expect_fail=self.expect_fail,
-        )
+        with mypy_plugins_config.scenario() as scenario:
+            scenario.disable_cache = self.disable_cache
+            scenario.environment_variables = self.environment_variables
+            scenario.additional_mypy_config = self.additional_mypy_config
+            scenario.expect_fail = self.expect_fail
+            scenario.expected_output = self.expected_output
+
+            for file in self.files:
+                scenario.make_file(file)
+
+            scenario.run_and_check_mypy("main.py")
