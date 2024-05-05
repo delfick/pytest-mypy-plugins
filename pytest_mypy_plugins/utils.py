@@ -54,6 +54,12 @@ def fname_to_module(fpath: Path, root_path: Path) -> Optional[str]:
         return None
 
 
+def maybe_abspath(fpath: Optional[str]) -> Optional[str]:
+    if fpath is None:
+        return None
+    return str(Path(fpath).resolve())
+
+
 # AssertStringArraysEqual displays special line alignment helper messages if
 # the first different line has at least this many characters,
 MIN_LINE_LENGTH_FOR_ALIGNMENT = 5

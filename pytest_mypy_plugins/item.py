@@ -128,9 +128,14 @@ class MypyPluginsConfig:
     same_process: bool
     test_only_local_stub: bool
     root_directory: str
-    ini_file: Optional[str]
-    pyproject_toml_file: Optional[str]
+    base_ini_fpath: Optional[str]
+    base_pyproject_toml_fpath: Optional[str]
     extension_hook: Optional[str]
+
+    def __post_init__(self) -> None:
+        # You cannot use both `.ini` and `pyproject.toml` files at the same time:
+        if self.base_ini_fpath and self.base_pyproject_toml_fpath:
+            raise ValueError("Cannot specify both `--mypy-ini-file` and `--mypy-pyproject-toml-file`")
 
 
 class MypyExecutor:
@@ -338,33 +343,19 @@ class YamlTestItem(pytest.Item):
             same_process=self.config.option.mypy_same_process,
             test_only_local_stub=self.config.option.mypy_only_local_stub,
             root_directory=self.config.option.mypy_testing_base,
-            ini_file=self.config.option.mypy_ini_file,
-            pyproject_toml_file=self.config.option.mypy_pyproject_toml_file,
+            base_ini_fpath=utils.maybe_abspath(self.config.option.mypy_ini_file),
+            base_pyproject_toml_fpath=utils.maybe_abspath(self.config.option.mypy_pyproject_toml_file),
             extension_hook=self.config.option.mypy_extension_hook,
         )
 
         self.same_process = mypy_plugins_config.same_process
         self.test_only_local_stub = mypy_plugins_config.test_only_local_stub
         self.extension_hook = mypy_plugins_config.extension_hook
+        self.base_ini_fpath = mypy_plugins_config.base_ini_fpath
+        self.base_pyproject_toml_fpath = mypy_plugins_config.base_pyproject_toml_fpath
 
         # config parameters
         self.root_directory = mypy_plugins_config.root_directory
-
-        # You cannot use both `.ini` and `pyproject.toml` files at the same time:
-        if mypy_plugins_config.ini_file and mypy_plugins_config.pyproject_toml_file:
-            raise ValueError("Cannot specify both `--mypy-ini-file` and `--mypy-pyproject-toml-file`")
-
-        self.base_ini_fpath: Optional[str]
-        if mypy_plugins_config.ini_file:
-            self.base_ini_fpath = os.path.abspath(mypy_plugins_config.ini_file)
-        else:
-            self.base_ini_fpath = None
-
-        self.base_pyproject_toml_fpath: Optional[str]
-        if mypy_plugins_config.pyproject_toml_file:
-            self.base_pyproject_toml_fpath = os.path.abspath(mypy_plugins_config.pyproject_toml_file)
-        else:
-            self.base_pyproject_toml_fpath = None
 
         self.incremental_cache_dir = os.path.join(self.root_directory, ".mypy_cache")
 
