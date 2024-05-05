@@ -143,6 +143,7 @@ class MypyPluginsConfig:
     base_ini_fpath: Optional[str]
     base_pyproject_toml_fpath: Optional[str]
     extension_hook: Optional[str]
+    incremental_cache_dir: str
 
     def __post_init__(self) -> None:
         # You cannot use both `.ini` and `pyproject.toml` files at the same time:
@@ -166,6 +167,27 @@ class MypyPluginsConfig:
             cleanup_cache()
 
         assert not os.path.exists(temp_dir.name)
+
+    def remove_cache_files(self, fpath_no_suffix: Path) -> None:
+        cache_file = Path(self.incremental_cache_dir)
+        cache_file /= ".".join([str(part) for part in sys.version_info[:2]])
+        for part in fpath_no_suffix.parts:
+            cache_file /= part
+
+        data_json_file = cache_file.with_suffix(".data.json")
+        if data_json_file.exists():
+            data_json_file.unlink()
+        meta_json_file = cache_file.with_suffix(".meta.json")
+        if meta_json_file.exists():
+            meta_json_file.unlink()
+
+        for parent_dir in cache_file.parents:
+            if (
+                parent_dir.exists()
+                and len(list(parent_dir.iterdir())) == 0
+                and str(self.incremental_cache_dir) in str(parent_dir)
+            ):
+                parent_dir.rmdir()
 
 
 class MypyExecutor:
@@ -376,6 +398,7 @@ class YamlTestItem(pytest.Item):
             base_ini_fpath=utils.maybe_abspath(self.config.option.mypy_ini_file),
             base_pyproject_toml_fpath=utils.maybe_abspath(self.config.option.mypy_pyproject_toml_file),
             extension_hook=self.config.option.mypy_extension_hook,
+            incremental_cache_dir=os.path.join(self.config.option.mypy_testing_base, ".mypy_cache"),
         )
         self.mypy_plugins_config = mypy_plugins_config
 
@@ -385,43 +408,20 @@ class YamlTestItem(pytest.Item):
         self.base_ini_fpath = mypy_plugins_config.base_ini_fpath
         self.base_pyproject_toml_fpath = mypy_plugins_config.base_pyproject_toml_fpath
 
-        self.incremental_cache_dir = os.path.join(self.mypy_plugins_config.root_directory, ".mypy_cache")
-
-    def remove_cache_files(self, fpath_no_suffix: Path) -> None:
-        cache_file = Path(self.incremental_cache_dir)
-        cache_file /= ".".join([str(part) for part in sys.version_info[:2]])
-        for part in fpath_no_suffix.parts:
-            cache_file /= part
-
-        data_json_file = cache_file.with_suffix(".data.json")
-        if data_json_file.exists():
-            data_json_file.unlink()
-        meta_json_file = cache_file.with_suffix(".meta.json")
-        if meta_json_file.exists():
-            meta_json_file.unlink()
-
-        for parent_dir in cache_file.parents:
-            if (
-                parent_dir.exists()
-                and len(list(parent_dir.iterdir())) == 0
-                and str(self.incremental_cache_dir) in str(parent_dir)
-            ):
-                parent_dir.rmdir()
-
     def execute_extension_hook(self, extension_hook_fqname: str) -> None:
         module_name, func_name = extension_hook_fqname.rsplit(".", maxsplit=1)
         module = importlib.import_module(module_name)
         extension_hook = getattr(module, func_name)
         extension_hook(self)
 
-    def cleanup_cache(self) -> None:
-        if not self.disable_cache:
-            for file in self.files:
-                path = Path(file.path)
-                self.remove_cache_files(path.with_suffix(""))
-
     def runtest(self) -> None:
-        with self.mypy_plugins_config.make_execution_path(self.cleanup_cache) as execution_path:
+        def cleanup_cache() -> None:
+            if not self.disable_cache:
+                for file in self.files:
+                    path = Path(file.path)
+                    self.mypy_plugins_config.remove_cache_files(path.with_suffix(""))
+
+        with self.mypy_plugins_config.make_execution_path(cleanup_cache) as execution_path:
             mypy_executable = shutil.which("mypy")
             assert mypy_executable is not None, "mypy executable is not found"
             rootdir = getattr(getattr(self.parent, "config", None), "rootdir", None)
@@ -451,7 +451,7 @@ class YamlTestItem(pytest.Item):
                     mypy_executor=mypy_executor,
                     output_checker=output_checker,
                     test_only_local_stub=self.test_only_local_stub,
-                    incremental_cache_dir=self.incremental_cache_dir,
+                    incremental_cache_dir=self.mypy_plugins_config.incremental_cache_dir,
                 ).run()
 
     def prepare_config_file(self, execution_path: Path) -> Optional[str]:
