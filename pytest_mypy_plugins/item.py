@@ -3,7 +3,6 @@ import dataclasses
 import importlib
 import io
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -178,6 +177,8 @@ class MypyPluginsConfig:
     base_pyproject_toml_fpath: Optional[str]
     extension_hook: Optional[str]
     incremental_cache_dir: str
+    mypy_executable: str
+    pytest_rootdir: Optional[Path]
 
     def __post_init__(self) -> None:
         # You cannot use both `.ini` and `pyproject.toml` files at the same time:
@@ -249,7 +250,7 @@ class MypyExecutor:
     def __init__(
         self,
         same_process: bool,
-        rootdir: Union[Path, None],
+        rootdir: Optional[Path],
         execution_path: Path,
         environment_variables: Dict[str, Any],
         mypy_executable: str,
@@ -459,10 +460,6 @@ class YamlTestItem(pytest.Item):
                     mypy_plugins_config.remove_cache_files(path.with_suffix(""))
 
         with mypy_plugins_config.make_execution_path(cleanup_cache) as execution_path:
-            mypy_executable = shutil.which("mypy")
-            assert mypy_executable is not None, "mypy executable is not found"
-            rootdir = getattr(getattr(self.parent, "config", None), "rootdir", None)
-
             # extension point for derived packages
             mypy_plugins_config.execute_extension_hook(self)
 
@@ -470,9 +467,9 @@ class YamlTestItem(pytest.Item):
                 mypy_executor = MypyExecutor(
                     same_process=mypy_plugins_config.same_process,
                     execution_path=execution_path,
-                    rootdir=rootdir,
+                    rootdir=mypy_plugins_config.pytest_rootdir,
                     environment_variables=self.environment_variables,
-                    mypy_executable=mypy_executable,
+                    mypy_executable=mypy_plugins_config.mypy_executable,
                 )
 
                 output_checker = OutputChecker(

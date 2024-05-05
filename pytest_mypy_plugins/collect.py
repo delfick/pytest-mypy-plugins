@@ -1,5 +1,6 @@
 import os
 import pathlib
+import shutil
 import tempfile
 from typing import Any, Dict, Hashable, Iterator, List, Mapping, Optional
 
@@ -52,6 +53,9 @@ class YamlTestFile(pytest.File):
 
 @pytest.fixture(scope="session")
 def mypy_plugins_config(pytestconfig: pytest.Config) -> MypyPluginsConfig:
+    mypy_executable = shutil.which("mypy")
+    assert mypy_executable is not None, "mypy executable is not found"
+
     return MypyPluginsConfig(
         same_process=pytestconfig.option.mypy_same_process,
         test_only_local_stub=pytestconfig.option.mypy_only_local_stub,
@@ -60,6 +64,8 @@ def mypy_plugins_config(pytestconfig: pytest.Config) -> MypyPluginsConfig:
         base_pyproject_toml_fpath=utils.maybe_abspath(pytestconfig.option.mypy_pyproject_toml_file),
         extension_hook=pytestconfig.option.mypy_extension_hook,
         incremental_cache_dir=os.path.join(pytestconfig.option.mypy_testing_base, ".mypy_cache"),
+        mypy_executable=mypy_executable,
+        pytest_rootdir=getattr(pytestconfig, "rootdir", None),
     )
 
 
