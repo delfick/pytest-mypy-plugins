@@ -58,3 +58,37 @@ def test_closed_schema() -> None:
         )
 
     assert ex.value.message == "Additional properties are not allowed ('extra_field' was unexpected)"
+
+
+def test_files_in_first_run_cant_be_null() -> None:
+    with pytest.raises(jsonschema.exceptions.ValidationError) as ex:
+        validate_schema(
+            [
+                {
+                    "__line__": 0,
+                    "case": "mypy_config_is_not_an_object",
+                    "main": "False",
+                    "files": [{"path": "a.py", "content": None}],
+                }
+            ]
+        )
+    assert ex.value.message == "None is not of type 'string'"
+    assert list(ex.value.schema_path) == ["items", "properties", "files", "items", "properties", "content", "type"]
+
+
+def test_closed_schema_with_followup() -> None:
+    validate_schema(
+        [
+            {
+                "__line__": 0,
+                "case": "mypy_config_is_not_an_object",
+                "main": "False",
+                "followups": [
+                    {"main": "True"},
+                    {"files": [{"path": "a.py", "content": ""}], "out": ""},
+                    {"files": [{"path": "a.py", "content": None}], "out": ""},
+                ],
+            }
+        ],
+        is_closed=True,
+    )

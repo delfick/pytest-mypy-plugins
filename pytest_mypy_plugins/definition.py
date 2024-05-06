@@ -13,6 +13,8 @@ from typing import (
     Mapping,
     MutableMapping,
     MutableSequence,
+    Sequence,
+    Tuple,
     Union,
 )
 
@@ -20,7 +22,7 @@ import jsonschema
 import pytest
 
 from . import utils
-from .scenario import MypyPluginsConfig, MypyPluginsScenario
+from .scenario import Followup, MypyPluginsConfig, MypyPluginsScenario
 
 
 def validate_schema(data: List[Mapping[str, Any]], *, is_closed: bool = False) -> None:
@@ -78,6 +80,25 @@ def _parse_parametrized(params: List[Mapping[str, object]]) -> Iterator[Mapping[
         yield from param_lists
 
 
+def _parse_followups(followups: List[Mapping[str, object]]) -> Iterator[Followup]:
+    """
+    followups is assumed to be after the schema has been validated on the list
+    """
+    fields = [f.name for f in dataclasses.fields(Followup)]
+    file_fields = [f.name for f in dataclasses.fields(utils.FollowupFile)]
+
+    for followup in followups:
+        kwargs: Dict[str, Any] = {k: v for k, v in followup.items() if k in fields}
+
+        files = kwargs.pop("files", [])
+        kwargs["files"] = []
+        for file in files:
+            options: Dict[str, Any] = {k: v for k, v in file.items() if k in file_fields}
+            kwargs["files"].append(utils.FollowupFile(**options))
+
+        yield Followup(**kwargs)
+
+
 def _run_skip(skip: Union[bool, str]) -> bool:
     if isinstance(skip, bool):
         return skip
@@ -112,6 +133,7 @@ class ItemDefinition:
     case: str
     main: str
     files: MutableSequence[utils.File]
+    followups: MutableSequence[Followup]
     starting_lineno: int
     parsed_test_data: Mapping[str, object]
     additional_properties: Mapping[str, object]
@@ -167,11 +189,17 @@ class ItemDefinition:
                 env = []
             kwargs["environment_variables"] = _parse_environment_variables(env)
 
+            # Get any followup options
+            followups = raw_item.pop("followups", None)
+            if not isinstance(followups, list):
+                followups = []
+            kwargs["followups"] = list(_parse_followups(followups))
+
             # Get the parametrized options
             parametrized = raw_item.pop("parametrized", None)
             if not isinstance(parametrized, list):
                 parametrized = []
-            parametrized = _parse_parametrized(parametrized)
+            parametrized = list(_parse_parametrized(parametrized))
 
             # Set the rest of the options
             for k, v in raw_item.items():
@@ -227,7 +255,65 @@ class ItemDefinition:
         scenario.environment_variables = self.environment_variables
         scenario.additional_mypy_config = self.additional_mypy_config
 
+        files: MutableMapping[str, str] = {}
         for file in self.files:
             scenario.make_file(file)
+            files[file.path] = file.content
 
-        scenario.run_and_check_mypy("main.py", expect_fail=self.expect_fail, expected_output=self.expected_output)
+        out = self.out
+        expect_fail = self.expect_fail
+        expected_output = self.expected_output
+
+        scenario.run_and_check_mypy("main.py", expect_fail=expect_fail, expected_output=expected_output)
+
+        for followup in self.followups:
+            if not _run_skip(followup.skip):
+                expect_fail, out, expected_output = self.followup(
+                    scenario,
+                    followup,
+                    files=files,
+                    previous_out=out,
+                    previous_expect_fail=expect_fail,
+                    previous_expected_output=expected_output,
+                )
+
+    def followup(
+        self,
+        scenario: MypyPluginsScenario,
+        followup: Followup,
+        files: MutableMapping[str, str],
+        previous_out: str,
+        previous_expect_fail: bool,
+        previous_expected_output: MutableSequence[utils.OutputMatcher],
+    ) -> Tuple[bool, str, MutableSequence[utils.OutputMatcher]]:
+        if followup.main is not None:
+            content = utils.render_template(template=followup.main, data=self.item_params)
+            scenario.make_file(utils.File(path="main.py", content=content))
+            files["main.py"] = content
+
+        for file in followup.files:
+            scenario.handle_followup_file(file)
+            if file.content:
+                files[file.path] = file.content
+            elif file.path in files:
+                del files[file.path]
+
+        out = previous_out
+        if followup.out is not None:
+            out = followup.out
+
+        expect_fail = previous_expect_fail
+        expected_output = previous_expected_output
+        if followup.expect_fail is not None:
+            expect_fail = followup.expect_fail
+
+        expected_output = _create_output_matchers(
+            regex=self.regex,
+            files=[utils.File(path=path, content=content) for path, content in files.items()],
+            out=out,
+            params=self.item_params,
+        )
+
+        scenario.run_and_check_mypy("main.py", expect_fail=expect_fail, expected_output=expected_output)
+        scenario.cleanup_cache()
+        return expect_fail, out, expected_output

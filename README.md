@@ -92,14 +92,31 @@ On top of that, each case must comply to following types:
 | `skip`          | `str`                                                  | Expression evaluated with following globals set: `sys`, `os`, `pytest` and `platform`                               |
 | `expect_fail`   | `bool`                                                 | Mark test case as an expected failure, like [`@pytest.mark.xfail`](https://docs.pytest.org/en/stable/skipping.html) |
 | `regex`         | `str`                                                  | Allow regular expressions in comments to be matched against actual output. Defaults to "no", i.e. matches full text.|
+| `followups`     | `Optional[List[Followup]]=[]`*                         | Allow specifying changes to the files for followup runs of mypy                                                     |
 
 (*) Appendix to **pseudo** types used above:
 
 ```python
 class File:
     path: str
-    content: Optional[str] = None
+    content: str = ""
+
+class FollowupFile:
+    path: str
+    # Content must be specified
+    # an empty string will keep the file existing, but empty
+    # null will delete the file
+    content: Optional[str]
+
 Parameter = Mapping[str, Any]
+
+class Followup:
+    # if main is None it is unchanged
+    main: Optional[str] = None
+    files: List[FollowupFile] = []
+    skip: bool | str = False
+    out: Optional[str] = None
+    expect_fail: Optional[bool] = None
 ```
 
 Implementation notes:
@@ -111,6 +128,7 @@ Implementation notes:
 - `skip` - an expression set in `skip` is passed directly into
   [`eval`](https://docs.python.org/3/library/functions.html#eval). It is advised to take a peek and
   learn about how `eval` works.
+- An empty followup means the code is unchanged and mypy will be run again with the same `out` and `expect_fail`
 
 Repository also offers a [JSONSchema](pytest_mypy_plugins/schema.json), with which
 it validates the input. It can also offer your editor auto-completions, descriptions, and validation.

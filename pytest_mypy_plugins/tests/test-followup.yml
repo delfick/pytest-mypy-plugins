@@ -1,0 +1,36 @@
+- case: followup_works_fine
+  main: |
+    from module import takes_str, value
+    takes_str(value)
+  out: |
+    main:2: error: Argument 1 to "takes_str" has incompatible type "int"; expected "str"  [arg-type]
+
+  files:
+    - path: module/__init__.py
+      content: |
+        from .value import value
+
+        def takes_str(s: str) -> None:
+            pass
+    - path: module/value.py
+      content: |
+        value: int = 1
+
+  followups:
+    - out: ""
+      files:
+        - path: module/value.py
+          content: |
+            value: str = "asdf"
+
+    - expect_fail: true
+      files:
+        - path: module/value.py
+          content: |
+            value: bool = False
+
+    - expect_fail: false
+      files:
+        - path: module/value.py
+          content: |
+            value: str = "stuff"

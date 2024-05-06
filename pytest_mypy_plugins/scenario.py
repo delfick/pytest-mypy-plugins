@@ -3,6 +3,7 @@ import dataclasses
 import importlib
 import io
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,7 @@ from typing import (
     Sequence,
     TextIO,
     Tuple,
+    Union,
 )
 
 from mypy import build
@@ -28,6 +30,7 @@ from mypy.main import process_options
 from . import configs, utils
 from .utils import (
     File,
+    FollowupFile,
     OutputMatcher,
     TypecheckAssertionError,
     assert_expected_matched_actual,
@@ -83,6 +86,15 @@ def _run_mypy_typechecking(cmd_options: Sequence[str], stdout: TextIO, stderr: T
     return ReturnCodes.SUCCESS
 
 
+@dataclasses.dataclass
+class Followup:
+    main: Optional[str] = None
+    skip: Union[bool, str] = False
+    files: List[FollowupFile] = dataclasses.field(default_factory=list)
+    out: Optional[str] = None
+    expect_fail: Optional[bool] = None
+
+
 class ItemForHook(Protocol):
     """
     The guaranteed available options for a hook
@@ -105,6 +117,10 @@ class ItemForHook(Protocol):
         pass
 
     @property
+    def followups(self) -> MutableSequence[Followup]:
+        pass
+
+    @property
     def environment_variables(self) -> MutableMapping[str, Any]:
         pass
 
@@ -114,8 +130,7 @@ class ItemForHook(Protocol):
 
 
 class ExtensionHook(Protocol):
-    def __call__(self, item: ItemForHook) -> None:
-        ...
+    def __call__(self, item: ItemForHook) -> None: ...
 
 
 @dataclasses.dataclass(frozen=True)
@@ -241,7 +256,7 @@ class MypyExecutor:
         completed = subprocess.run(
             [self.mypy_executable, *mypy_cmd_options],
             capture_output=True,
-            cwd=os.getcwd(),
+            cwd=self.execution_path,
             env=self.environment_variables,
         )
         captured_stdout = completed.stdout.decode()
@@ -402,3 +417,16 @@ class MypyPluginsScenario:
         fpath = current_directory / file.path
         fpath.parent.mkdir(parents=True, exist_ok=True)
         fpath.write_text(file.content)
+
+    def handle_followup_file(self, file: FollowupFile) -> None:
+        self.paths.append(Path(file.path))
+        current_directory = Path.cwd()
+        fpath = current_directory / file.path
+        if file.content is None:
+            if fpath.is_dir():
+                shutil.rmtree(fpath)
+            else:
+                fpath.unlink(missing_ok=True)
+        else:
+            fpath.parent.mkdir(parents=True, exist_ok=True)
+            fpath.write_text(file.content)

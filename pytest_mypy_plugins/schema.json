@@ -130,6 +130,34 @@
         "type": "boolean",
         "description": "Allow regular expressions in comments to be matched against actual output. _See pytest_mypy_plugins/tests/test-regex_assertions.yml for examples_",
         "default": false
+      },
+      "followups": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/Followup"
+        },
+        "description": "List of followup changes. Where each entry represents a change to make before running mypy again",
+        "examples": [
+          [
+            {
+              "main": "Some different content",
+              "out": "..."
+            },
+            {
+              "files": [
+                {
+                  "path": "some_file.py",
+                  "content": null
+                },
+                {
+                  "path": "some_other_file.py",
+                  "content": "contents"
+                }
+              ],
+              "out": "..."
+            }
+          ]
+        ]
       }
     },
     "required": [
@@ -162,6 +190,36 @@
         "path"
       ]
     },
+    "FollowupFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File path.",
+          "examples": [
+            "../extras/extra_module.py",
+            "myapp/__init__.py"
+          ]
+        },
+        "content": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "description": "File content. Must be valid Python code. null will indicate the deletion of the file",
+          "examples": [
+            "def help(): pass",
+            "def help():\n    pass\n",
+            null
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ]
+    },
     "Parameter": {
       "type": "object",
       "additionalProperties": true,
@@ -171,6 +229,99 @@
           "val": "1",
           "rt": "str"
         }
+      ]
+    },
+    "Followup": {
+      "type": "object",
+      "description": "A description of a followup mypy run. An empty followup means a mypy run with no change and same expect_fail/out as previous run",
+      "additionalProperties": true,
+      "properties": {
+        "main": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "description": "Portion of the code as if written in `.py` file. Must be valid Python code. null indicates no change.",
+          "examples": [
+            {
+              "main": "reveal_type(1)"
+            }
+          ]
+        },
+        "expect_fail": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Mark test case as an expected failure.",
+          "default": null
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FollowupFile"
+          },
+          "description": "List of extra files to simulate imports if needed where content may be null to indicate the removal of a file",
+          "examples": [
+            [
+              {
+                "path": "myapp/__init__.py"
+              },
+              {
+                "path": "myapp/utils.py",
+                "content": null
+              }
+            ]
+          ]
+        },
+        "out": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "description": "Verbose output expected from `mypy`.",
+          "examples": [
+            {
+              "out": "main:1: note: Revealed type is \"Literal[1]?\""
+            }
+          ]
+        },
+        "skip": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "An expression set in `skip` is passed directly into [`eval`](https://docs.python.org/3/library/functions.html#eval). It is advised to take a peek and learn about how `eval` works. Expression evaluated with following globals set: `sys`, `os`, `pytest` and `platform`.",
+          "examples": [
+            "yes",
+            true,
+            "sys.version_info > (2, 0)"
+          ],
+          "default": false
+        }
+      },
+      "examples": [
+        [
+          {
+            "main": "Some different content",
+            "out": "..."
+          },
+          {
+            "files": [
+              {
+                "path": "some_file.py",
+                "content": null
+              },
+              {
+                "path": "some_other_file.py",
+                "content": "contents"
+              }
+            ],
+            "out": "..."
+          }
+        ]
       ]
     }
   }

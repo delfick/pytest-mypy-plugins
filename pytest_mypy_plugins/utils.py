@@ -32,6 +32,12 @@ class File:
     content: str = ""
 
 
+@dataclass
+class FollowupFile:
+    path: str
+    content: Optional[str]
+
+
 @contextmanager
 def temp_environ() -> Iterator[None]:
     """Allow the ability to set os.environ temporarily"""
