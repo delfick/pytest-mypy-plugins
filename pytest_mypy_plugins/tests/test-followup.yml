@@ -2,8 +2,10 @@
   main: |
     from module import takes_str, value
     takes_str(value)
+    reveal_type(value)
   out: |
     main:2: error: Argument 1 to "takes_str" has incompatible type "int"; expected "str"  [arg-type]
+    main:3: note: Revealed type is "builtins.int"
 
   files:
     - path: module/__init__.py
@@ -18,21 +20,25 @@
 
   followups:
     - description: "changed to str, should pass"
-      out: ""
+      out: |
+        main:3: note: Revealed type is "builtins.str"
       files:
         - path: module/value.py
           content: |
             value: str = "asdf"
 
     - description: "changed to bool, should fail"
-      expect_fail: true
+      out: |
+        main:2: error: Argument 1 to "takes_str" has incompatible type "bool"; expected "str"  [arg-type]
+        main:3: note: Revealed type is "builtins.bool"
       files:
         - path: module/value.py
           content: |
             value: bool = False
 
     - description: "changed to str, should pass again"
-      expect_fail: false
+      out: |
+        main:3: note: Revealed type is "builtins.str"
       files:
         - path: module/value.py
           content: |

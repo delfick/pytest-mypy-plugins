@@ -153,11 +153,16 @@ class Strategy(enum.Enum):
       - First with an empty cache relative to the temporary directory
       - and again after that cache is made.
       - The disable-cache option prevents the second run in this strategy
+
+    DAEMON
+      - A new dmypy is started and run twice for each run
+      - The disable-cache option prevents the second run in this strategy
     """
 
     SHARED_INCREMENTAL = "SHARED_INCREMENTAL"
     NO_INCREMENTAL = "NO_INCREMENTAL"
     NON_SHARED_INCREMENTAL = "NON_SHARED_INCREMENTAL"
+    DAEMON = "DAEMON"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -175,12 +180,16 @@ class MypyPluginsConfig:
     extension_hook: Optional[str]
     incremental_cache_dir: str
     mypy_executable: str
+    dmypy_executable: Optional[str]
     pytest_rootdir: Optional[Path]
 
     def __post_init__(self) -> None:
         # You cannot use both `.ini` and `pyproject.toml` files at the same time:
         if self.base_ini_fpath and self.base_pyproject_toml_fpath:
             raise ValueError("Cannot specify both `--mypy-ini-file` and `--mypy-pyproject-toml-file`")
+
+        if self.same_process and self.strategy is Strategy.DAEMON:
+            raise ValueError("same-process not implemented for daemon strategy")
 
     @contextlib.contextmanager
     def scenario(self) -> Iterator["MypyPluginsScenario"]:
@@ -201,6 +210,10 @@ class MypyPluginsConfig:
             with utils.cd(execution_path):
                 yield scenario
         finally:
+            if self.strategy is Strategy.DAEMON and self.dmypy_executable is not None:
+                subprocess.run(
+                    [self.dmypy_executable, "stop"], cwd=str(execution_path), capture_output=True, check=True
+                )
             temp_dir.cleanup()
 
         assert not os.path.exists(temp_dir.name)
@@ -239,6 +252,8 @@ class MypyPluginsConfig:
         if config_file:
             mypy_cmd_options.append(f"--config-file={config_file}")
 
+        mypy_short = "mypy"
+
         if self.strategy is Strategy.SHARED_INCREMENTAL:
             if not disable_cache:
                 mypy_cmd_options.extend(["--cache-dir", self.incremental_cache_dir])
@@ -246,6 +261,9 @@ class MypyPluginsConfig:
             mypy_cmd_options.append("--no-incremental")
         elif self.strategy is Strategy.NON_SHARED_INCREMENTAL:
             mypy_cmd_options.append("--incremental")
+        elif self.strategy is Strategy.DAEMON:
+            assert self.dmypy_executable is not None
+            mypy_short = "dmypy run --"
 
         mypy_cmd_options.append(start)
 
@@ -255,17 +273,26 @@ class MypyPluginsConfig:
             rootdir=self.pytest_rootdir,
             environment_variables=dict(environment_variables),
             mypy_executable=self.mypy_executable,
+            dmypy_executable=self.dmypy_executable,
         )
 
         cache_existed = (execute_from / ".mypy_cache").exists()
+        if self.strategy is Strategy.DAEMON:
+            cache_existed = (execute_from / ".dmypy.json").exists()
         try:
-            run_log.append(f"  % {' '.join(mypy_cmd_options)}")
+            run_log.append(f"  % {mypy_short} {' '.join(mypy_cmd_options)}")
             returncode, (stdout, stderr) = mypy_executor.execute(mypy_cmd_options)
+            run_log.append(f"  | returncode: {returncode}")
+            run_log.extend([f"  | stdout: {line}" for line in stdout.split("\n")])
+            run_log.extend([f"  | stderr: {line}" for line in stderr.split("\n")])
             output_checker.check(returncode, stdout, stderr)
 
-            if self.strategy is Strategy.NON_SHARED_INCREMENTAL and not cache_existed:
+            if self.strategy in (Strategy.DAEMON, Strategy.NON_SHARED_INCREMENTAL) and not cache_existed:
                 run_log.append("  % ran again")
                 returncode, (stdout, stderr) = mypy_executor.execute(mypy_cmd_options)
+                run_log.append(f"  | returncode: {returncode}")
+                run_log.extend([f"  | stdout: {line}" for line in stdout.split("\n")])
+                run_log.extend([f"  | stderr: {line}" for line in stderr.split("\n")])
                 output_checker.check(returncode, stdout, stderr)
         finally:
             if self.strategy is Strategy.SHARED_INCREMENTAL and not disable_cache:
@@ -317,11 +344,13 @@ class MypyExecutor:
         execute_from: Path,
         environment_variables: MutableMapping[str, Any],
         mypy_executable: str,
+        dmypy_executable: Optional[str],
     ) -> None:
         self.rootdir = rootdir
         self.same_process = same_process
         self.execute_from = execute_from
         self.mypy_executable = mypy_executable
+        self.dmypy_executable = dmypy_executable
         self.environment_variables = environment_variables
 
     def execute(self, mypy_cmd_options: Sequence[str]) -> Tuple[int, Tuple[str, str]]:
@@ -341,14 +370,22 @@ class MypyExecutor:
         if "SYSTEMROOT" in os.environ:
             self.environment_variables["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
 
+        cmd: List[str]
+        if self.dmypy_executable is not None:
+            cmd = [self.dmypy_executable, "run", "--", *mypy_cmd_options]
+        else:
+            cmd = [self.mypy_executable, *mypy_cmd_options]
+
         completed = subprocess.run(
-            [self.mypy_executable, *mypy_cmd_options],
+            cmd,
             capture_output=True,
             cwd=self.execute_from,
             env=self.environment_variables,
         )
         captured_stdout = completed.stdout.decode()
         captured_stderr = completed.stderr.decode()
+        if self.dmypy_executable is not None:
+            captured_stdout = captured_stdout.replace("Daemon started\n", "")
         return completed.returncode, (captured_stdout, captured_stderr)
 
     def _typecheck_in_same_process(self, mypy_cmd_options: Sequence[Any]) -> Tuple[int, Tuple[str, str]]:
@@ -422,8 +459,9 @@ class OutputChecker:
 
         output_lines = []
         for line in mypy_output.splitlines():
-            output_line = self._replace_fpath_with_module_name(line, rootdir=self.execution_path)
-            output_lines.append(output_line)
+            if ":" in line:
+                line = line.strip().replace(".py:", ":")
+            output_lines.append(line)
         try:
             assert_expected_matched_actual(expected=self.expected_output, actual=output_lines)
         except TypecheckAssertionError as e:
@@ -432,13 +470,6 @@ class OutputChecker:
         else:
             if self.expect_fail:
                 raise TypecheckAssertionError("Expected failure, but test passed")
-
-    def _replace_fpath_with_module_name(self, line: str, rootdir: Path) -> str:
-        if ":" not in line:
-            return line
-        out_fpath, res_line = line.split(":", 1)
-        line = os.path.relpath(out_fpath, start=rootdir) + ":" + res_line
-        return line.strip().replace(".py:", ":")
 
 
 @dataclasses.dataclass
@@ -451,7 +482,10 @@ class MypyPluginsScenario:
 
     environment_variables: MutableMapping[str, Any] = dataclasses.field(default_factory=dict)
 
-    runs: MutableSequence[str] = dataclasses.field(default_factory=list)
+    runs: MutableSequence[str] = dataclasses.field(default_factory=list, init=False)
+
+    def __post_init__(self) -> None:
+        self.runs = [f"Ran mypy the following times from {self.execution_path}"]
 
     def run_and_check_mypy(
         self,
@@ -466,7 +500,7 @@ class MypyPluginsScenario:
 
         self.mypy_plugins_config.execute_static_check(
             execute_from=self.execution_path,
-            start=str(self.execution_path / main_file),
+            start=main_file,
             environment_variables=self.environment_variables,
             disable_cache=self.disable_cache,
             additional_mypy_config=self.additional_mypy_config,
@@ -477,6 +511,7 @@ class MypyPluginsScenario:
     def make_file(self, file: File) -> None:
         current_directory = Path.cwd()
         fpath = current_directory / file.path
+        self.runs.append(f"  > Created {fpath}")
         fpath.parent.mkdir(parents=True, exist_ok=True)
         fpath.write_text(file.content)
 
@@ -484,10 +519,18 @@ class MypyPluginsScenario:
         current_directory = Path.cwd()
         fpath = current_directory / file.path
         if file.content is None:
+            self.runs.append(f"  > Deleted {fpath}")
             if fpath.is_dir():
                 shutil.rmtree(fpath)
             else:
                 fpath.unlink(missing_ok=True)
         else:
+            if fpath.exists():
+                if fpath.read_text() == file.content:
+                    return
+
+                self.runs.append(f"  > Changed {fpath}")
+            else:
+                self.runs.append(f"  > Created {fpath}")
             fpath.parent.mkdir(parents=True, exist_ok=True)
             fpath.write_text(file.content)

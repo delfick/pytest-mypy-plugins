@@ -43,6 +43,8 @@ jobs:
       run: pytest --mypy-cache-strategy NON_SHARED_INCREMENTAL
     - name: Run tests no incremental strategy
       run: pytest --mypy-cache-strategy NO_INCREMENTAL
+    - name: Run tests daemon strategy
+      run: pytest --mypy-cache-strategy DAEMON
 
   lint:
     runs-on: ubuntu-latest
