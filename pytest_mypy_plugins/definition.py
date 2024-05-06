@@ -78,6 +78,31 @@ def _parse_parametrized(params: List[Mapping[str, object]]) -> Iterator[Mapping[
         yield from param_lists
 
 
+def _run_skip(skip: Union[bool, str]) -> bool:
+    if isinstance(skip, bool):
+        return skip
+    elif skip == "True":
+        return True
+    elif skip == "False":
+        return False
+    else:
+        return eval(skip, {"sys": sys, "os": os, "pytest": pytest, "platform": platform})
+
+
+def _create_output_matchers(
+    *, regex: bool, files: Sequence[utils.File], out: str, params: Mapping[str, object]
+) -> MutableSequence[utils.OutputMatcher]:
+    expected_output: List[utils.OutputMatcher] = []
+    for test_file in files:
+        output_lines = utils.extract_output_matchers_from_comments(
+            test_file.path, test_file.content.split("\n"), regex=regex
+        )
+        expected_output.extend(output_lines)
+
+    expected_output.extend(utils.extract_output_matchers_from_out(out, params, regex=regex))
+    return expected_output
+
+
 @dataclasses.dataclass
 class ItemDefinition:
     """
@@ -102,6 +127,7 @@ class ItemDefinition:
     # These are set when `from_yaml` returns all the parametrized, non skipped tests
     item_params: Mapping[str, object] = dataclasses.field(default_factory=dict, init=False)
     additional_mypy_config: str = dataclasses.field(init=False)
+    expected_output: MutableSequence[utils.OutputMatcher] = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
         if not self.case.isidentifier():
@@ -158,7 +184,7 @@ class ItemDefinition:
             for params in parametrized:
                 clone = nxt.clone(params)
 
-                if not clone._skipped:
+                if not _run_skip(clone.skip):
                     yield clone
 
     def clone(self, item_params: Mapping[str, object]) -> "ItemDefinition":
@@ -167,18 +193,10 @@ class ItemDefinition:
         clone.environment_variables = dict(clone.environment_variables)
         clone.item_params = item_params
         clone.additional_mypy_config = utils.render_template(template=self.mypy_config, data=item_params)
+        clone.expected_output = _create_output_matchers(
+            regex=clone.regex, files=[clone.main_file, *clone.files], out=clone.out, params=item_params
+        )
         return clone
-
-    @property
-    def _skipped(self) -> bool:
-        if isinstance(self.skip, bool):
-            return self.skip
-        elif self.skip == "True":
-            return True
-        elif self.skip == "False":
-            return False
-        else:
-            return eval(self.skip, {"sys": sys, "os": os, "pytest": pytest, "platform": platform})
 
     @property
     def test_name(self) -> str:
@@ -195,18 +213,6 @@ class ItemDefinition:
     def main_file(self) -> utils.File:
         content = utils.render_template(template=self.main, data=self.item_params)
         return utils.File(path="main.py", content=content)
-
-    @property
-    def expected_output(self) -> List[utils.OutputMatcher]:
-        expected_output: List[utils.OutputMatcher] = []
-        for test_file in self.files:
-            output_lines = utils.extract_output_matchers_from_comments(
-                test_file.path, test_file.content.split("\n"), regex=self.regex
-            )
-            expected_output.extend(output_lines)
-
-        expected_output.extend(utils.extract_output_matchers_from_out(self.out, self.item_params, regex=self.regex))
-        return expected_output
 
     def runtest(self, mypy_plugins_config: MypyPluginsConfig, mypy_plugins_scenario: MypyPluginsScenario) -> None:
         scenario = mypy_plugins_scenario
