@@ -249,6 +249,15 @@
             }
           ]
         },
+        "description": {
+          "type": "string",
+          "description": "A description of the followup used for reporting",
+          "examples": [
+            {
+              "description": "No changes, should pass again"
+            }
+          ]
+        },
         "expect_fail": {
           "type": [
             "boolean",

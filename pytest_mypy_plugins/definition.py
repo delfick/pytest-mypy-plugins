@@ -264,10 +264,12 @@ class ItemDefinition:
         expect_fail = self.expect_fail
         expected_output = self.expected_output
 
+        scenario.runs.append("Running first run")
         scenario.run_and_check_mypy("main.py", expect_fail=expect_fail, expected_output=expected_output)
 
-        for followup in self.followups:
+        for idx, followup in enumerate(self.followups):
             if not _run_skip(followup.skip):
+                scenario.runs.append(f"Running followup: {idx}: {followup.description}")
                 expect_fail, out, expected_output = self.followup(
                     scenario,
                     followup,
@@ -276,6 +278,8 @@ class ItemDefinition:
                     previous_expect_fail=expect_fail,
                     previous_expected_output=expected_output,
                 )
+            else:
+                scenario.runs.append(f"Skipping followup: {idx}: {followup.description}")
 
     def followup(
         self,

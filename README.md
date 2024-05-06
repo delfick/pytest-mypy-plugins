@@ -113,6 +113,7 @@ Parameter = Mapping[str, Any]
 class Followup:
     # if main is None it is unchanged
     main: Optional[str] = None
+    description: str = ""
     files: List[FollowupFile] = []
     skip: bool | str = False
     out: Optional[str] = None

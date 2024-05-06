@@ -89,6 +89,7 @@ def _run_mypy_typechecking(cmd_options: Sequence[str], stdout: TextIO, stderr: T
 @dataclasses.dataclass
 class Followup:
     main: Optional[str] = None
+    description: str = ""
     skip: Union[bool, str] = False
     files: List[FollowupFile] = dataclasses.field(default_factory=list)
     out: Optional[str] = None
@@ -362,6 +363,8 @@ class MypyPluginsScenario:
 
     paths: MutableSequence[Path] = dataclasses.field(default_factory=list)
     environment_variables: MutableMapping[str, Any] = dataclasses.field(default_factory=dict)
+
+    runs: MutableSequence[str] = dataclasses.field(default_factory=list)
 
     def cleanup_cache(self) -> None:
         if not self.disable_cache:

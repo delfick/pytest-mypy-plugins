@@ -17,19 +17,22 @@
         value: int = 1
 
   followups:
-    - out: ""
+    - description: "changed to str, should pass"
+      out: ""
       files:
         - path: module/value.py
           content: |
             value: str = "asdf"
 
-    - expect_fail: true
+    - description: "changed to bool, should fail"
+      expect_fail: true
       files:
         - path: module/value.py
           content: |
             value: bool = False
 
-    - expect_fail: false
+    - description: "changed to str, should pass again"
+      expect_fail: false
       files:
         - path: module/value.py
           content: |

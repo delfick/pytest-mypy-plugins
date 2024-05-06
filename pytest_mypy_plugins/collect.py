@@ -148,8 +148,11 @@ def mypy_plugins_config(pytestconfig: pytest.Config) -> MypyPluginsConfig:
 
 
 @pytest.fixture()
-def mypy_plugins_scenario(mypy_plugins_config: MypyPluginsConfig) -> Iterator[MypyPluginsScenario]:
+def mypy_plugins_scenario(
+    mypy_plugins_config: MypyPluginsConfig, request: pytest.FixtureRequest
+) -> Iterator[MypyPluginsScenario]:
     with mypy_plugins_config.scenario() as scenario:
+        request.node.user_properties.append(("mypy_plugins_runs", scenario.runs))
         yield scenario
 
 
@@ -157,6 +160,15 @@ def pytest_collect_file(file_path: pathlib.Path, parent: Node) -> Optional[pytes
     if file_path.suffix in {".yaml", ".yml"} and file_path.name.startswith(("test-", "test_")):
         return YamlTestFile.from_parent(parent, path=file_path)
     return None
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    if report.when == "call" and report.outcome == "failed":
+        for name, val in report.user_properties:
+            if name == "mypy_plugins_runs" and isinstance(val, list):
+                report.sections.append(
+                    (name, "Ran mypy the following times:\n" + "\n".join(f" - {run}" for run in val)),
+                )
 
 
 def pytest_addoption(parser: Parser) -> None:
