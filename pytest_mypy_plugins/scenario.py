@@ -1,5 +1,6 @@
 import contextlib
 import dataclasses
+import enum
 import importlib
 import io
 import os
@@ -134,6 +135,19 @@ class ExtensionHook(Protocol):
     def __call__(self, item: ItemForHook) -> None: ...
 
 
+class Strategy(enum.Enum):
+    """
+    The strategy used by the plugin
+
+    SHARED_INCREMENTAL (default)
+      - mypy only run once each time. disable_cache doesn't change incremental setting
+      - not setting disable_cache uses a shared cache where files are deleted from it
+      - after each time mypy is run
+    """
+
+    SHARED_INCREMENTAL = "SHARED_INCREMENTAL"
+
+
 @dataclasses.dataclass(frozen=True)
 class MypyPluginsConfig:
     """
@@ -141,6 +155,7 @@ class MypyPluginsConfig:
     """
 
     same_process: bool
+    strategy: Strategy
     test_only_local_stub: bool
     root_directory: str
     base_ini_fpath: Optional[str]
@@ -175,7 +190,6 @@ class MypyPluginsConfig:
                 yield scenario
         finally:
             temp_dir.cleanup()
-            scenario.cleanup_cache()
 
         assert not os.path.exists(temp_dir.name)
 
@@ -186,6 +200,52 @@ class MypyPluginsConfig:
         module = importlib.import_module(module_name)
         extension_hook = getattr(module, func_name)
         extension_hook(node)
+
+    def execute_static_check(
+        self,
+        *,
+        execute_from: Path,
+        start: str,
+        environment_variables: Mapping[str, str],
+        disable_cache: bool,
+        additional_mypy_config: str,
+    ) -> Tuple[int, Tuple[str, str]]:
+        config_file = self.prepare_config_file(execute_from, additional_mypy_config)
+
+        mypy_cmd_options = [
+            "--show-traceback",
+            "--no-error-summary",
+            "--no-pretty",
+            "--hide-error-context",
+        ]
+
+        if not self.test_only_local_stub:
+            mypy_cmd_options.append("--no-silence-site-packages")
+
+        if config_file:
+            mypy_cmd_options.append(f"--config-file={config_file}")
+
+        if self.strategy is Strategy.SHARED_INCREMENTAL:
+            if not disable_cache:
+                mypy_cmd_options.extend(["--cache-dir", self.incremental_cache_dir])
+
+        mypy_cmd_options.append(start)
+
+        mypy_executor = MypyExecutor(
+            same_process=self.same_process,
+            execute_from=execute_from,
+            rootdir=self.pytest_rootdir,
+            environment_variables=dict(environment_variables),
+            mypy_executable=self.mypy_executable,
+        )
+        try:
+            return mypy_executor.execute(mypy_cmd_options)
+        finally:
+            if self.strategy is Strategy.SHARED_INCREMENTAL and not disable_cache:
+                for root, dirs, files in os.walk(execute_from):
+                    for name in files:
+                        path = (Path(root) / name).relative_to(execute_from)
+                        self.remove_cache_files(path.with_suffix(""))
 
     def remove_cache_files(self, fpath_no_suffix: Path) -> None:
         cache_file = Path(self.incremental_cache_dir)
@@ -227,13 +287,13 @@ class MypyExecutor:
         self,
         same_process: bool,
         rootdir: Optional[Path],
-        execution_path: Path,
+        execute_from: Path,
         environment_variables: MutableMapping[str, Any],
         mypy_executable: str,
     ) -> None:
         self.rootdir = rootdir
         self.same_process = same_process
-        self.execution_path = execution_path
+        self.execute_from = execute_from
         self.mypy_executable = mypy_executable
         self.environment_variables = environment_variables
 
@@ -257,7 +317,7 @@ class MypyExecutor:
         completed = subprocess.run(
             [self.mypy_executable, *mypy_cmd_options],
             capture_output=True,
-            cwd=self.execution_path,
+            cwd=self.execute_from,
             env=self.environment_variables,
         )
         captured_stdout = completed.stdout.decode()
@@ -272,7 +332,8 @@ class MypyExecutor:
                 os.environ[key] = val
 
             # add current directory to path
-            sys.path.insert(0, str(self.execution_path))
+            if str(self.execute_from) not in sys.path:
+                sys.path.insert(0, str(self.execute_from))
 
             stdout = io.StringIO()
             stderr = io.StringIO()
@@ -290,7 +351,7 @@ class MypyExecutor:
         existing_python_path = os.environ.get("PYTHONPATH")
         if existing_python_path:
             python_path_parts.append(existing_python_path)
-        python_path_parts.append(str(self.execution_path))
+        python_path_parts.append(str(self.execute_from))
         python_path_key = self.environment_variables.get("PYTHONPATH")
         if python_path_key:
             python_path_parts.append(self._maybe_to_abspath(python_path_key, rootdir))
@@ -361,68 +422,34 @@ class MypyPluginsScenario:
     disable_cache: bool = False
     additional_mypy_config: str = ""
 
-    paths: MutableSequence[Path] = dataclasses.field(default_factory=list)
     environment_variables: MutableMapping[str, Any] = dataclasses.field(default_factory=dict)
 
     runs: MutableSequence[str] = dataclasses.field(default_factory=list)
 
-    def cleanup_cache(self) -> None:
-        if not self.disable_cache:
-            for path in self.paths:
-                self.mypy_plugins_config.remove_cache_files(path.with_suffix(""))
-
-    def _prepare_mypy_cmd_options(self, main_file: Path) -> Sequence[str]:
-        config_file = self.mypy_plugins_config.prepare_config_file(self.execution_path, self.additional_mypy_config)
-
-        mypy_cmd_options = [
-            "--show-traceback",
-            "--no-error-summary",
-            "--no-pretty",
-            "--hide-error-context",
-        ]
-
-        if not self.mypy_plugins_config.test_only_local_stub:
-            mypy_cmd_options.append("--no-silence-site-packages")
-
-        if not self.disable_cache:
-            mypy_cmd_options.extend(["--cache-dir", self.mypy_plugins_config.incremental_cache_dir])
-
-        if config_file:
-            mypy_cmd_options.append(f"--config-file={config_file}")
-
-        mypy_cmd_options.append(str(main_file))
-
-        return mypy_cmd_options
-
     def run_and_check_mypy(
         self, main_file: str, *, expect_fail: bool, expected_output: Sequence[OutputMatcher]
     ) -> None:
-        mypy_executor = MypyExecutor(
-            same_process=self.mypy_plugins_config.same_process,
-            execution_path=self.execution_path,
-            rootdir=self.mypy_plugins_config.pytest_rootdir,
-            environment_variables=self.environment_variables,
-            mypy_executable=self.mypy_plugins_config.mypy_executable,
-        )
-
         output_checker = OutputChecker(
             expect_fail=expect_fail, execution_path=self.execution_path, expected_output=expected_output
         )
 
-        mypy_cmd_options = self._prepare_mypy_cmd_options(self.execution_path / main_file)
+        returncode, (stdout, stderr) = self.mypy_plugins_config.execute_static_check(
+            execute_from=self.execution_path,
+            start=str(self.execution_path / "main.py"),
+            environment_variables=self.environment_variables,
+            disable_cache=self.disable_cache,
+            additional_mypy_config=self.additional_mypy_config,
+        )
 
-        returncode, (stdout, stderr) = mypy_executor.execute(mypy_cmd_options)
         output_checker.check(returncode, stdout, stderr)
 
     def make_file(self, file: File) -> None:
-        self.paths.append(Path(file.path))
         current_directory = Path.cwd()
         fpath = current_directory / file.path
         fpath.parent.mkdir(parents=True, exist_ok=True)
         fpath.write_text(file.content)
 
     def handle_followup_file(self, file: FollowupFile) -> None:
-        self.paths.append(Path(file.path))
         current_directory = Path.cwd()
         fpath = current_directory / file.path
         if file.content is None:

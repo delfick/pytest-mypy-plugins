@@ -2,6 +2,7 @@ import os
 import pathlib
 import shutil
 import tempfile
+import textwrap
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -27,7 +28,7 @@ from _pytest.nodes import Node
 
 from . import utils
 from .definition import ItemDefinition
-from .scenario import MypyPluginsConfig, MypyPluginsScenario
+from .scenario import MypyPluginsConfig, MypyPluginsScenario, Strategy
 
 # For backwards compatibility reasons this reference stays here
 File = utils.File
@@ -144,6 +145,7 @@ def mypy_plugins_config(pytestconfig: pytest.Config) -> MypyPluginsConfig:
         incremental_cache_dir=os.path.join(pytestconfig.option.mypy_testing_base, ".mypy_cache"),
         mypy_executable=mypy_executable,
         pytest_rootdir=getattr(pytestconfig, "rootdir", None),
+        strategy=Strategy(pytestconfig.option.mypy_cache_strategy),
     )
 
 
@@ -206,4 +208,10 @@ def pytest_addoption(parser: Parser) -> None:
         "--mypy-closed-schema",
         action="store_true",
         help="Use closed schema to validate YAML test cases, which won't allow any extra keys (does not work well with `--mypy-extension-hook`)",
+    )
+    group.addoption(
+        "--mypy-cache-strategy",
+        choices=[strat.name for strat in Strategy],
+        help=textwrap.dedent(Strategy.__doc__ or ""),
+        default=Strategy.SHARED_INCREMENTAL.value,
     )

@@ -319,5 +319,4 @@ class ItemDefinition:
         )
 
         scenario.run_and_check_mypy("main.py", expect_fail=expect_fail, expected_output=expected_output)
-        scenario.cleanup_cache()
         return expect_fail, out, expected_output
