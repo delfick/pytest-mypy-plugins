@@ -342,7 +342,6 @@ class MypyPluginsScenario:
     execution_path: Path
     mypy_plugins_config: MypyPluginsConfig
 
-    expect_fail: bool = False
     disable_cache: bool = False
     additional_mypy_config: str = ""
 
@@ -379,7 +378,9 @@ class MypyPluginsScenario:
 
         return mypy_cmd_options
 
-    def run_and_check_mypy(self, main_file: str) -> None:
+    def run_and_check_mypy(
+        self, main_file: str, *, expect_fail: bool, expected_output: Sequence[OutputMatcher]
+    ) -> None:
         mypy_executor = MypyExecutor(
             same_process=self.mypy_plugins_config.same_process,
             execution_path=self.execution_path,
@@ -389,7 +390,7 @@ class MypyPluginsScenario:
         )
 
         output_checker = OutputChecker(
-            expect_fail=self.expect_fail, execution_path=self.execution_path, expected_output=self.expected_output
+            expect_fail=expect_fail, execution_path=self.execution_path, expected_output=expected_output
         )
 
         mypy_cmd_options = self._prepare_mypy_cmd_options(self.execution_path / main_file)

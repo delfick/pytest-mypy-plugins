@@ -226,10 +226,8 @@ class ItemDefinition:
         scenario.disable_cache = self.disable_cache
         scenario.environment_variables = self.environment_variables
         scenario.additional_mypy_config = self.additional_mypy_config
-        scenario.expect_fail = self.expect_fail
-        scenario.expected_output = self.expected_output
 
         for file in self.files:
             scenario.make_file(file)
 
-        scenario.run_and_check_mypy("main.py")
+        scenario.run_and_check_mypy("main.py", expect_fail=self.expect_fail, expected_output=self.expected_output)
