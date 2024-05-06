@@ -345,14 +345,12 @@ class MypyPluginsScenario:
     disable_cache: bool = False
     additional_mypy_config: str = ""
 
-    files: MutableSequence[File] = dataclasses.field(default_factory=list)
-    expected_output: MutableSequence[OutputMatcher] = dataclasses.field(default_factory=list)
+    paths: MutableSequence[Path] = dataclasses.field(default_factory=list)
     environment_variables: MutableMapping[str, Any] = dataclasses.field(default_factory=dict)
 
     def cleanup_cache(self) -> None:
         if not self.disable_cache:
-            for file in self.files:
-                path = Path(file.path)
+            for path in self.paths:
                 self.mypy_plugins_config.remove_cache_files(path.with_suffix(""))
 
     def _prepare_mypy_cmd_options(self, main_file: Path) -> Sequence[str]:
@@ -399,7 +397,7 @@ class MypyPluginsScenario:
         output_checker.check(returncode, stdout, stderr)
 
     def make_file(self, file: File) -> None:
-        self.files.append(file)
+        self.paths.append(Path(file.path))
         current_directory = Path.cwd()
         fpath = current_directory / file.path
         fpath.parent.mkdir(parents=True, exist_ok=True)
