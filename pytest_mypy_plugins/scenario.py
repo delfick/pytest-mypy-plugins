@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import (
     Any,
@@ -525,12 +526,21 @@ class MypyPluginsScenario:
             else:
                 fpath.unlink(missing_ok=True)
         else:
+            mtime_before: Optional[int]
             if fpath.exists():
                 if fpath.read_text() == file.content:
                     return
 
+                mtime_before = int(fpath.stat().st_mtime)
                 self.runs.append(f"  > Changed {fpath}")
             else:
+                mtime_before = None
                 self.runs.append(f"  > Created {fpath}")
             fpath.parent.mkdir(parents=True, exist_ok=True)
             fpath.write_text(file.content)
+
+            # Need to make sure that the mtime seconds is a different number
+            # Otherwise mypy doesn't think it has changed
+            while int(fpath.stat().st_mtime) == mtime_before:
+                time.sleep(fpath.stat().st_mtime - mtime_before)
+                fpath.write_text(file.content)
