@@ -264,7 +264,6 @@ class ItemDefinition:
         expect_fail = self.expect_fail
         expected_output = self.expected_output
 
-        scenario.runs.append("Running first run")
         scenario.run_and_check_mypy("main.py", expect_fail=expect_fail, expected_output=expected_output)
 
         for idx, followup in enumerate(self.followups):

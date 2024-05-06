@@ -216,26 +216,30 @@ mypy-tests:
   --mypy-testing-base=MYPY_TESTING_BASE
                         Base directory for tests to use
   --mypy-pyproject-toml-file=MYPY_PYPROJECT_TOML_FILE
-                        Which `pyproject.toml` file to use
-                        as a default config for tests.
-                        Incompatible with `--mypy-ini-file`
+                        Which `pyproject.toml` file to use as a default config for tests. Incompatible with `--mypy-ini-file`
   --mypy-ini-file=MYPY_INI_FILE
-                        Which `.ini` file to use as a default config for tests.
-                        Incompatible with `--mypy-pyproject-toml-file`
-  --mypy-same-process
-                        Run in the same process. Useful for debugging,
-                        will create problems with import cache
+                        Which `.ini` file to use as a default config for tests. Incompatible with `--mypy-pyproject-toml-file`
+  --mypy-same-process   Run in the same process. Useful for debugging, will create problems with import cache
   --mypy-extension-hook=MYPY_EXTENSION_HOOK
-                        Fully qualified path to the extension hook function,
-                        in case you need custom yaml keys. Has to be top-level
-                        Takes in one argument matching the Protocol
-                        `pytest_mypy_plugins.ItemForhook`
+                        Fully qualified path to the extension hook function, in case you need custom yaml keys. Has to be top-level.
   --mypy-only-local-stub
                         mypy will ignore errors from site-packages
-  --mypy-closed-schema
-                        Use closed schema to validate YAML test cases,
-                        which won't allow any extra keys
-                        (does not work well with `--mypy-extension-hook`)
+  --mypy-closed-schema  Use closed schema to validate YAML test cases, which won't allow any extra keys (does not work well with `--mypy-extension-
+                        hook`)
+  --mypy-cache-strategy={SHARED_INCREMENTAL,NO_INCREMENTAL,NON_SHARED_INCREMENTAL}
+                        The strategy used by the plugin
+                        SHARED_INCREMENTAL (default)
+                        - mypy only run once each time. disable_cache doesn't change incremental setting
+                        - not setting disable_cache uses a shared cache where files are deleted from it
+                        - after each time mypy is run
+                        NO_INCREMENTAL
+                        - mypy is run one for each run with --no-incremental. The disable-cache option
+                        - does nothing in this strategy
+                        NON_SHARED_INCREMENTAL
+                        - mypy is run twice for each run with --incremental.
+                        - First with an empty cache relative to the temporary directory
+                        - and again after that cache is made.
+                        - The disable-cache option prevents the second run in this strategy
 
 ```
 

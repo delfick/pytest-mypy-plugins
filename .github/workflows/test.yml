@@ -39,6 +39,10 @@ jobs:
         pip install -U "mypy${{ matrix.mypy-version }}"
     - name: Run tests
       run: pytest
+    - name: Run tests incremental strategy
+      run: pytest --mypy-cache-strategy NON_SHARED_INCREMENTAL
+    - name: Run tests no incremental strategy
+      run: pytest --mypy-cache-strategy NO_INCREMENTAL
 
   lint:
     runs-on: ubuntu-latest

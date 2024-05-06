@@ -143,9 +143,21 @@ class Strategy(enum.Enum):
       - mypy only run once each time. disable_cache doesn't change incremental setting
       - not setting disable_cache uses a shared cache where files are deleted from it
       - after each time mypy is run
+
+    NO_INCREMENTAL
+      - mypy is run one for each run with --no-incremental. The disable-cache option
+      - does nothing in this strategy
+
+    NON_SHARED_INCREMENTAL
+      - mypy is run twice for each run with --incremental.
+      - First with an empty cache relative to the temporary directory
+      - and again after that cache is made.
+      - The disable-cache option prevents the second run in this strategy
     """
 
     SHARED_INCREMENTAL = "SHARED_INCREMENTAL"
+    NO_INCREMENTAL = "NO_INCREMENTAL"
+    NON_SHARED_INCREMENTAL = "NON_SHARED_INCREMENTAL"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -209,7 +221,9 @@ class MypyPluginsConfig:
         environment_variables: Mapping[str, str],
         disable_cache: bool,
         additional_mypy_config: str,
-    ) -> Tuple[int, Tuple[str, str]]:
+        output_checker: "OutputChecker",
+        run_log: MutableSequence[str],
+    ) -> None:
         config_file = self.prepare_config_file(execute_from, additional_mypy_config)
 
         mypy_cmd_options = [
@@ -228,6 +242,10 @@ class MypyPluginsConfig:
         if self.strategy is Strategy.SHARED_INCREMENTAL:
             if not disable_cache:
                 mypy_cmd_options.extend(["--cache-dir", self.incremental_cache_dir])
+        elif self.strategy is Strategy.NO_INCREMENTAL:
+            mypy_cmd_options.append("--no-incremental")
+        elif self.strategy is Strategy.NON_SHARED_INCREMENTAL:
+            mypy_cmd_options.append("--incremental")
 
         mypy_cmd_options.append(start)
 
@@ -238,8 +256,17 @@ class MypyPluginsConfig:
             environment_variables=dict(environment_variables),
             mypy_executable=self.mypy_executable,
         )
+
+        cache_existed = (execute_from / ".mypy_cache").exists()
         try:
-            return mypy_executor.execute(mypy_cmd_options)
+            run_log.append(f"  % {' '.join(mypy_cmd_options)}")
+            returncode, (stdout, stderr) = mypy_executor.execute(mypy_cmd_options)
+            output_checker.check(returncode, stdout, stderr)
+
+            if self.strategy is Strategy.NON_SHARED_INCREMENTAL and not cache_existed:
+                run_log.append("  % ran again")
+                returncode, (stdout, stderr) = mypy_executor.execute(mypy_cmd_options)
+                output_checker.check(returncode, stdout, stderr)
         finally:
             if self.strategy is Strategy.SHARED_INCREMENTAL and not disable_cache:
                 for root, dirs, files in os.walk(execute_from):
@@ -427,21 +454,25 @@ class MypyPluginsScenario:
     runs: MutableSequence[str] = dataclasses.field(default_factory=list)
 
     def run_and_check_mypy(
-        self, main_file: str, *, expect_fail: bool, expected_output: Sequence[OutputMatcher]
+        self,
+        main_file: str,
+        *,
+        expect_fail: bool,
+        expected_output: Sequence[OutputMatcher],
     ) -> None:
         output_checker = OutputChecker(
             expect_fail=expect_fail, execution_path=self.execution_path, expected_output=expected_output
         )
 
-        returncode, (stdout, stderr) = self.mypy_plugins_config.execute_static_check(
+        self.mypy_plugins_config.execute_static_check(
             execute_from=self.execution_path,
-            start=str(self.execution_path / "main.py"),
+            start=str(self.execution_path / main_file),
             environment_variables=self.environment_variables,
             disable_cache=self.disable_cache,
             additional_mypy_config=self.additional_mypy_config,
+            output_checker=output_checker,
+            run_log=self.runs,
         )
-
-        output_checker.check(returncode, stdout, stderr)
 
     def make_file(self, file: File) -> None:
         current_directory = Path.cwd()
