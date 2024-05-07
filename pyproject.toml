@@ -13,7 +13,7 @@ warn_unused_configs = true
 
 [tool.pytest.ini_options]
 python_files = "test_*.py"
-addopts = "-s --mypy-extension-hook pytest_mypy_plugins.tests.reveal_type_hook.hook"
+addopts = "-s --mypy-extension-hook pytest_mypy_plugins.tests.reveal_type_hook.hook --mypy-scenario-hooks pytest_mypy_plugins.tests.scenario_hooks_example.Hooks "
 
 [tool.black]
 line-length = 120

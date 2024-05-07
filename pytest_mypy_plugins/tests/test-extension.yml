@@ -4,3 +4,17 @@
   reveal_type: 1
   out: |
     main:1: note: Revealed type is "Literal[1]?"
+
+- case: scenario_hooks_is_loaded
+  main: |
+    # if scenario hook works, a "stuff.py" should be added containing 'reveal_type(desired_val)'
+  start: stuff.py
+  desired_val: 1
+  out: |
+    stuff:1: note: Revealed type is "Literal[1]?"
+  followups:
+    - main: |
+        # if scenario hook works, the "stuff.py" will be changed to have `reveal_type(desired_val)`
+      desired_val: 2
+      out: |
+        stuff:1: note: Revealed type is "Literal[2]?"

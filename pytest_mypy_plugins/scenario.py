@@ -1,7 +1,6 @@
 import contextlib
 import dataclasses
 import enum
-import importlib
 import io
 import os
 import shutil
@@ -11,6 +10,7 @@ import tempfile
 import time
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
     Iterator,
     List,
@@ -23,6 +23,7 @@ from typing import (
     TextIO,
     Tuple,
     Union,
+    runtime_checkable,
 )
 
 from mypy import build
@@ -96,6 +97,7 @@ class Followup:
     files: List[FollowupFile] = dataclasses.field(default_factory=list)
     out: Optional[str] = None
     expect_fail: Optional[bool] = None
+    additional_properties: Mapping[str, object] = dataclasses.field(default_factory=dict)
 
 
 class ItemForHook(Protocol):
@@ -133,6 +135,7 @@ class ItemForHook(Protocol):
         pass
 
 
+@runtime_checkable
 class ExtensionHook(Protocol):
     def __call__(self, item: ItemForHook) -> None: ...
 
@@ -179,7 +182,8 @@ class MypyPluginsConfig:
     root_directory: str
     base_ini_fpath: Optional[str]
     base_pyproject_toml_fpath: Optional[str]
-    extension_hook: Optional[str]
+    extension_hook: Optional[ExtensionHook]
+    scenario_hooks: "ScenarioHooks"
     incremental_cache_dir: str
     mypy_executable: str
     dmypy_executable: Optional[str]
@@ -207,7 +211,9 @@ class MypyPluginsConfig:
             ) from e
 
         execution_path = Path(temp_dir.name)
-        scenario = MypyPluginsScenario(execution_path=execution_path, mypy_plugins_config=self)
+        scenario = MypyPluginsScenario(
+            execution_path=execution_path, mypy_plugins_config=self, scenario_hooks=self.scenario_hooks
+        )
         try:
             with utils.cd(execution_path):
                 yield scenario
@@ -221,12 +227,8 @@ class MypyPluginsConfig:
         assert not os.path.exists(temp_dir.name)
 
     def execute_extension_hook(self, node: ItemForHook) -> None:
-        if self.extension_hook is None:
-            return
-        module_name, func_name = self.extension_hook.rsplit(".", maxsplit=1)
-        module = importlib.import_module(module_name)
-        extension_hook = getattr(module, func_name)
-        extension_hook(node)
+        if self.extension_hook is not None:
+            self.extension_hook(node)
 
     def execute_static_check(
         self,
@@ -477,10 +479,12 @@ class OutputChecker:
 @dataclasses.dataclass
 class MypyPluginsScenario:
     execution_path: Path
+    scenario_hooks: "ScenarioHooks"
     mypy_plugins_config: MypyPluginsConfig
 
     disable_cache: bool = False
     additional_mypy_config: str = ""
+    parsed_test_data: Mapping[str, object] = dataclasses.field(default_factory=dict)
 
     environment_variables: MutableMapping[str, Any] = dataclasses.field(default_factory=dict)
 
@@ -494,21 +498,40 @@ class MypyPluginsScenario:
         start: str,
         *,
         expect_fail: bool,
-        expected_output: Sequence[OutputMatcher],
+        expected_output: MutableSequence[OutputMatcher],
+        additional_properties: Mapping[str, object],
     ) -> None:
+        hook_result = self.scenario_hooks.before_run_and_check_mypy(
+            scenario=self,
+            options=ScenarioHooksRunAndCheckOptions(
+                start=start,
+                expect_fail=expect_fail,
+            ),
+            expected_output=expected_output,
+            additional_properties=additional_properties,
+        )
+
         output_checker = OutputChecker(
-            expect_fail=expect_fail, execution_path=self.execution_path, expected_output=expected_output
+            expect_fail=hook_result.expect_fail,
+            execution_path=self.execution_path,
+            expected_output=expected_output,
         )
 
         self.mypy_plugins_config.execute_static_check(
             execute_from=self.execution_path,
-            start=start,
+            start=hook_result.start,
             environment_variables=self.environment_variables,
             disable_cache=self.disable_cache,
             additional_mypy_config=self.additional_mypy_config,
             output_checker=output_checker,
             run_log=self.runs,
         )
+
+    def path_for(self, path: str, mkdir: bool = False) -> Path:
+        location = self.execution_path / path
+        if mkdir:
+            location.parent.mkdir(parents=True, exist_ok=True)
+        return location
 
     def make_file(self, file: File) -> None:
         current_directory = Path.cwd()
@@ -545,3 +568,42 @@ class MypyPluginsScenario:
             while int(fpath.stat().st_mtime) == mtime_before:
                 time.sleep(fpath.stat().st_mtime - mtime_before)
                 fpath.write_text(file.content)
+
+
+@dataclasses.dataclass(frozen=True)
+class ScenarioHooksRunAndCheckOptions:
+    """
+    Options passed in and out of the ``before_run_and_check_mypy`` ScenarioHooks hook
+    """
+
+    start: str
+    expect_fail: bool
+
+
+class ScenarioHooks:
+    def before_run_and_check_mypy(
+        self,
+        *,
+        scenario: MypyPluginsScenario,
+        options: ScenarioHooksRunAndCheckOptions,
+        expected_output: MutableSequence[OutputMatcher],
+        additional_properties: Mapping[str, object],
+    ) -> ScenarioHooksRunAndCheckOptions:
+        """
+        Used to do any adjustments to the scenario before running mypy
+
+        Must return the a ScenarioHooksRunAndCheckOptions object.
+
+        If it's desirable to return the one provided but with different options, ``dataclasses.replace``
+        is a good idea: ``return dataclasses.replace(options, expect_fail=True)``
+        """
+        return options
+
+
+class ScenarioHookMaker(Protocol):
+    def __call__(self) -> ScenarioHooks: ...
+
+
+if TYPE_CHECKING:
+    # Make sure our hooks acts as a valid scenario hook maker
+    _sh: ScenarioHookMaker = ScenarioHooks

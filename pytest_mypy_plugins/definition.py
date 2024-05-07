@@ -33,6 +33,7 @@ def validate_schema(data: List[Mapping[str, Any]], *, is_closed: bool = False) -
         "description": "Line number where the test starts (`pytest-mypy-plugins` internal)",
     }
     schema["items"]["additionalProperties"] = not is_closed
+    schema["definitions"]["Followup"]["additionalProperties"] = not is_closed
 
     jsonschema.validate(instance=data, schema=schema)
 
@@ -88,7 +89,19 @@ def _parse_followups(followups: List[Mapping[str, object]]) -> Iterator[Followup
     file_fields = [f.name for f in dataclasses.fields(utils.FollowupFile)]
 
     for followup in followups:
-        kwargs: Dict[str, Any] = {k: v for k, v in followup.items() if k in fields}
+        kwargs: Dict[str, Any] = {}
+
+        additional_properties: Dict[str, object] = {}
+        kwargs["additional_properties"] = additional_properties
+        found_additional = followup.get("additional_properties")
+        if isinstance(found_additional, Mapping):
+            kwargs["additional_properties"].update(found_additional)
+
+        for k, v in followup.items():
+            if k in fields:
+                kwargs[k] = v
+            else:
+                additional_properties[k] = v
 
         files = kwargs.pop("files", [])
         kwargs["files"] = []
@@ -265,7 +278,12 @@ class ItemDefinition:
         expect_fail = self.expect_fail
         expected_output = self.expected_output
 
-        scenario.run_and_check_mypy(self.start, expect_fail=expect_fail, expected_output=expected_output)
+        scenario.run_and_check_mypy(
+            self.start,
+            expect_fail=expect_fail,
+            expected_output=expected_output,
+            additional_properties=self.additional_properties,
+        )
 
         for idx, followup in enumerate(self.followups):
             if not _run_skip(followup.skip):
@@ -318,5 +336,10 @@ class ItemDefinition:
             params=self.item_params,
         )
 
-        scenario.run_and_check_mypy(self.start, expect_fail=expect_fail, expected_output=expected_output)
+        scenario.run_and_check_mypy(
+            self.start,
+            expect_fail=expect_fail,
+            expected_output=expected_output,
+            additional_properties=followup.additional_properties,
+        )
         return expect_fail, out, expected_output

@@ -223,6 +223,8 @@ mypy-tests:
   --mypy-same-process   Run in the same process. Useful for debugging, will create problems with import cache
   --mypy-extension-hook=MYPY_EXTENSION_HOOK
                         Fully qualified path to the extension hook function, in case you need custom yaml keys. Has to be top-level.
+  --mypy-scenario-hook=MYPY_SCENARIO_HOOK
+                        Fully qualified path to the scenario hook maker
   --mypy-only-local-stub
                         mypy will ignore errors from site-packages
   --mypy-closed-schema  Use closed schema to validate YAML test cases, which won't allow any extra keys (does not work well with `--mypy-extension-
@@ -244,7 +246,17 @@ mypy-tests:
 
 ```
 
-To type check an extension hook would look like:
+## Hooks
+
+There are two types of hooks that can be provided: extension hook and
+scenario hook.
+
+The extension hook can be used to modify the options for a yaml test case before
+anything is done, whereas the scenario hook may be used to perform actions before
+each run of mypy (especially useful for test cases with followup actions).
+
+To use an extension hook, either the `--mypy-extension-hook` option is used to
+provide the import path to a function, which would be specified as follows:
 
 ```python
 from typing import TYPE_CHECKING
@@ -259,6 +271,51 @@ def hook(item: ItemForHook) -> None:
 
 if TYPE_CHECKING:
     _h: ExtensionHook = hook
+```
+
+To create a scenario hook would be providing `--mypy-scenario-hooks` to an import
+path for a callable object that takes in no arguments and returns a
+`pytest_mypy_plugins.ScenarioHooks` object. It would look like:
+
+
+```
+from collections.abc import Mapping, MutableSequence
+from typing import TYPE_CHECKING
+
+from pytest_mypy_plugins import (
+    ScenarioHooks,
+    ScenarioHookMaker,
+    MypyPluginsScenario,
+    OutputMatcher,
+    ScenarioHooksRunAndCheckOptions,
+)
+
+
+class Hooks(ScenarioHooks):
+    def before_run_and_check_mypy(
+        self,
+        *,
+        scenario: MypyPluginsScenario,
+        options: ScenarioHooksRunAndCheckOptions,
+        expected_output: MutableSequence[OutputMatcher],
+        additional_properties: Mapping[str, object],
+    ) -> ScenarioHooksRunAndCheckOptions:
+        """
+        Used to do any adjustments to the scenario before running mypy
+
+        Must return the a ScenarioHooksRunAndCheckOptions object.
+
+        If it's desirable to return the one provided but with different options, ``dataclasses.replace``
+        is a good idea: ``return dataclasses.replace(options, expect_fail=True)``
+        """
+        return options
+
+
+if TYPE_CHECKING:
+  # Note that a class based off ScenarioHooks is already a valid hook maker
+  # But this will also work if you use some other function to return an instance
+  # of the hooks
+  _sh: ScenarioHookMaker = Hooks
 ```
 
 ## Further reading

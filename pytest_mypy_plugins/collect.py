@@ -1,3 +1,4 @@
+import importlib
 import os
 import pathlib
 import shutil
@@ -15,7 +16,9 @@ from typing import (
     Mapping,
     Optional,
     Tuple,
+    TypeVar,
     Union,
+    cast,
 )
 
 import pytest
@@ -28,7 +31,15 @@ from _pytest.nodes import Node
 
 from . import utils
 from .definition import ItemDefinition
-from .scenario import MypyPluginsConfig, MypyPluginsScenario, Strategy
+from .scenario import (
+    ExtensionHook,
+    MypyPluginsConfig,
+    MypyPluginsScenario,
+    ScenarioHooks,
+    Strategy,
+)
+
+T = TypeVar("T")
 
 # For backwards compatibility reasons this reference stays here
 File = utils.File
@@ -130,6 +141,38 @@ class YamlTestFile(pytest.File):
             )
 
 
+class _ExtensionHookCheckMeta(type):
+    def __instancecheck__(self, obj: object) -> bool:
+        return isinstance(obj, ExtensionHook)
+
+
+class _ExtensionHookCheck(metaclass=_ExtensionHookCheckMeta):
+    """
+    Used to check that the extension hook is an extension hook
+
+    Cause we can't pass around the ExtensionHook protocol into _import_hooks
+    """
+
+
+def _import_hooks(want: type[T], location: str, is_maker: bool) -> T:
+    module_name, var_name = location.rsplit(".", maxsplit=1)
+    module = importlib.import_module(module_name)
+    extension_hook = getattr(module, var_name, None)
+    if extension_hook is None:
+        raise RuntimeError(f"No hook found at {location}")
+
+    made: object
+    if is_maker:
+        made = extension_hook()
+    else:
+        made = extension_hook
+
+    if not isinstance(made, want):
+        raise RuntimeError(f"The hook at {location} is not of type {want}")
+
+    return made
+
+
 @pytest.fixture(scope="session")
 def mypy_plugins_config(pytestconfig: pytest.Config) -> MypyPluginsConfig:
 
@@ -143,13 +186,22 @@ def mypy_plugins_config(pytestconfig: pytest.Config) -> MypyPluginsConfig:
         dmypy_executable = shutil.which("dmypy")
         assert mypy_executable is not None, "dmypy executable is not found"
 
+    extension_hook: Optional[ExtensionHook] = None
+    if pytestconfig.option.mypy_extension_hook is not None:
+        extension_hook = cast(
+            ExtensionHook, _import_hooks(_ExtensionHookCheck, pytestconfig.option.mypy_extension_hook, is_maker=False)
+        )
+
+    scenario_hooks = _import_hooks(ScenarioHooks, pytestconfig.option.mypy_scenario_hooks, is_maker=True)
+
     return MypyPluginsConfig(
         same_process=pytestconfig.option.mypy_same_process,
         test_only_local_stub=pytestconfig.option.mypy_only_local_stub,
         root_directory=pytestconfig.option.mypy_testing_base,
         base_ini_fpath=utils.maybe_abspath(pytestconfig.option.mypy_ini_file),
         base_pyproject_toml_fpath=utils.maybe_abspath(pytestconfig.option.mypy_pyproject_toml_file),
-        extension_hook=pytestconfig.option.mypy_extension_hook,
+        extension_hook=extension_hook,
+        scenario_hooks=scenario_hooks,
         incremental_cache_dir=os.path.join(pytestconfig.option.mypy_testing_base, ".mypy_cache"),
         mypy_executable=mypy_executable,
         dmypy_executable=dmypy_executable,
@@ -210,6 +262,12 @@ def pytest_addoption(parser: Parser) -> None:
         type=str,
         help="Fully qualified path to the extension hook function, in case you need custom yaml keys. "
         "Has to be top-level.",
+    )
+    group.addoption(
+        "--mypy-scenario-hooks",
+        type=str,
+        help="Fully qualified path to the scenario hook class to hook into the operation of a scenario",
+        default="pytest_mypy_plugins.ScenarioHooks",
     )
     group.addoption(
         "--mypy-only-local-stub",

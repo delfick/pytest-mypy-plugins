@@ -4,6 +4,9 @@ from .scenario import (
     ItemForHook,
     MypyPluginsConfig,
     MypyPluginsScenario,
+    ScenarioHookMaker,
+    ScenarioHooks,
+    ScenarioHooksRunAndCheckOptions,
 )
 from .utils import File, FollowupFile, OutputMatcher
 
@@ -16,4 +19,7 @@ __all__ = [
     "OutputMatcher",
     "MypyPluginsConfig",
     "MypyPluginsScenario",
+    "ScenarioHookMaker",
+    "ScenarioHooks",
+    "ScenarioHooksRunAndCheckOptions",
 ]
