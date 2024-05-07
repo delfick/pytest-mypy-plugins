@@ -140,6 +140,7 @@ class ItemDefinition:
     environment_variables: MutableMapping[str, object]
 
     out: str = ""
+    start: str = "main.py"
     skip: Union[bool, str] = False
     regex: bool = False
     mypy_config: str = ""
@@ -264,7 +265,7 @@ class ItemDefinition:
         expect_fail = self.expect_fail
         expected_output = self.expected_output
 
-        scenario.run_and_check_mypy("main.py", expect_fail=expect_fail, expected_output=expected_output)
+        scenario.run_and_check_mypy(self.start, expect_fail=expect_fail, expected_output=expected_output)
 
         for idx, followup in enumerate(self.followups):
             if not _run_skip(followup.skip):
@@ -317,5 +318,5 @@ class ItemDefinition:
             params=self.item_params,
         )
 
-        scenario.run_and_check_mypy("main.py", expect_fail=expect_fail, expected_output=expected_output)
+        scenario.run_and_check_mypy(self.start, expect_fail=expect_fail, expected_output=expected_output)
         return expect_fail, out, expected_output

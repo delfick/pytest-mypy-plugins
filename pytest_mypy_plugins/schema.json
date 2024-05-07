@@ -33,6 +33,19 @@
           }
         ]
       },
+      "start": {
+        "type": "string",
+        "description": "The file or folder relative to the temporary folder for the test that mypy checks",
+        "default": "main.py",
+        "examples": [
+          {
+            "start": "."
+          },
+          {
+            "start": "main.py"
+          }
+        ]
+      },
       "out": {
         "type": "string",
         "description": "Verbose output expected from `mypy`.",

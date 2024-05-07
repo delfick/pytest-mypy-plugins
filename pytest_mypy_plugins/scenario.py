@@ -103,6 +103,7 @@ class ItemForHook(Protocol):
     The guaranteed available options for a hook
     """
 
+    start: str
     expect_fail: bool
     disable_cache: bool
     additional_mypy_config: str
@@ -490,7 +491,7 @@ class MypyPluginsScenario:
 
     def run_and_check_mypy(
         self,
-        main_file: str,
+        start: str,
         *,
         expect_fail: bool,
         expected_output: Sequence[OutputMatcher],
@@ -501,7 +502,7 @@ class MypyPluginsScenario:
 
         self.mypy_plugins_config.execute_static_check(
             execute_from=self.execution_path,
-            start=main_file,
+            start=start,
             environment_variables=self.environment_variables,
             disable_cache=self.disable_cache,
             additional_mypy_config=self.additional_mypy_config,

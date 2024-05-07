@@ -1,0 +1,18 @@
+- case: defaults_to_only_caring_about_mainpy
+  main: ""
+  out: ""
+  files:
+    - path: blah.py
+      content: |
+        a: int = "asdf"
+
+- case: start_check_from_file_or_folder_other_than_mainpy
+  start: .
+  main: ""
+  out: |
+    blah:1: error: Incompatible types in assignment (expression has type "str", variable has type "int")  [assignment]
+  files:
+    - path: blah.py
+      content: |
+        a: int = "asdf"
+
