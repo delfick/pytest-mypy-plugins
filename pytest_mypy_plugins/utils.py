@@ -200,6 +200,8 @@ def _add_aligned_message(s1: str, s2: str, error_message: str) -> str:
 def remove_empty_lines(lines: Sequence[str]) -> Sequence[str]:
     filtered_lines = []
     for line in lines:
+        if line.startswith(":debug:"):
+            continue
         if line:
             filtered_lines.append(line)
     return filtered_lines
