@@ -240,9 +240,8 @@ class MypyPluginsConfig:
         additional_mypy_config: str,
         output_checker: "OutputChecker",
         run_log: MutableSequence[str],
+        config_file: Path,
     ) -> None:
-        config_file = self.prepare_config_file(execute_from, additional_mypy_config)
-
         mypy_cmd_options = [
             "--show-traceback",
             "--no-error-summary",
@@ -326,18 +325,30 @@ class MypyPluginsConfig:
             ):
                 parent_dir.rmdir()
 
-    def prepare_config_file(self, execution_path: Path, additional_mypy_config: str) -> Optional[str]:
+    def prepare_config_file(self, execution_path: Path, additional_mypy_config: str) -> Path:
         # Merge (`self.base_ini_fpath` or `base_pyproject_toml_fpath`)
         # and `additional_mypy_config`
         # into one file and copy to the typechecking folder:
         if self.base_pyproject_toml_fpath:
-            return configs.join_toml_configs(self.base_pyproject_toml_fpath, additional_mypy_config, execution_path)
+            path = configs.join_toml_configs(self.base_pyproject_toml_fpath, additional_mypy_config, execution_path)
         elif self.base_ini_fpath or additional_mypy_config:
             # We might have `self.base_ini_fpath` set as well.
             # Or this might be a legacy case: only `mypy_config:` is set in the `yaml` test case.
             # This means that no real file is provided.
-            return configs.join_ini_configs(self.base_ini_fpath, additional_mypy_config, execution_path)
-        return None
+            path = configs.join_ini_configs(self.base_ini_fpath, additional_mypy_config, execution_path)
+        else:
+            # assume additional is an ini
+            path = configs.join_ini_configs(self.base_ini_fpath, additional_mypy_config, execution_path)
+
+        if path is None:
+            location = execution_path / "mypy.ini"
+        else:
+            location = Path(path)
+
+        if not location.exists():
+            location.write_text("[mypy]")
+
+        return location
 
 
 class MypyExecutor:
@@ -501,12 +512,15 @@ class MypyPluginsScenario:
         expected_output: MutableSequence[OutputMatcher],
         additional_properties: Mapping[str, object],
     ) -> None:
+        config_file = self.mypy_plugins_config.prepare_config_file(self.execution_path, self.additional_mypy_config)
+
         hook_result = self.scenario_hooks.before_run_and_check_mypy(
             scenario=self,
             options=ScenarioHooksRunAndCheckOptions(
                 start=start,
                 expect_fail=expect_fail,
             ),
+            config_file=config_file,
             expected_output=expected_output,
             additional_properties=additional_properties,
         )
@@ -525,6 +539,7 @@ class MypyPluginsScenario:
             additional_mypy_config=self.additional_mypy_config,
             output_checker=output_checker,
             run_log=self.runs,
+            config_file=config_file,
         )
 
     def path_for(self, path: str, mkdir: bool = False) -> Path:
@@ -586,6 +601,7 @@ class ScenarioHooks:
         *,
         scenario: MypyPluginsScenario,
         options: ScenarioHooksRunAndCheckOptions,
+        config_file: Path,
         expected_output: MutableSequence[OutputMatcher],
         additional_properties: Mapping[str, object],
     ) -> ScenarioHooksRunAndCheckOptions:

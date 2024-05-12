@@ -297,6 +297,7 @@ class Hooks(ScenarioHooks):
         *,
         scenario: MypyPluginsScenario,
         options: ScenarioHooksRunAndCheckOptions,
+        config_file: pathlib.Path,
         expected_output: MutableSequence[OutputMatcher],
         additional_properties: Mapping[str, object],
     ) -> ScenarioHooksRunAndCheckOptions:
