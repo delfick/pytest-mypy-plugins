@@ -105,7 +105,7 @@ class ItemForHook(Protocol):
     The guaranteed available options for a hook
     """
 
-    start: str
+    start: List[str]
     expect_fail: bool
     disable_cache: bool
     additional_mypy_config: str
@@ -234,7 +234,7 @@ class MypyPluginsConfig:
         self,
         *,
         execute_from: Path,
-        start: str,
+        start: List[str],
         environment_variables: Mapping[str, str],
         disable_cache: bool,
         additional_mypy_config: str,
@@ -268,7 +268,7 @@ class MypyPluginsConfig:
             assert self.dmypy_executable is not None
             mypy_short = "dmypy run --"
 
-        mypy_cmd_options.append(start)
+        mypy_cmd_options.extend(start)
 
         mypy_executor = MypyExecutor(
             same_process=self.same_process,
@@ -506,7 +506,7 @@ class MypyPluginsScenario:
 
     def run_and_check_mypy(
         self,
-        start: str,
+        start: List[str],
         *,
         expect_fail: bool,
         expected_output: MutableSequence[OutputMatcher],
@@ -591,7 +591,7 @@ class ScenarioHooksRunAndCheckOptions:
     Options passed in and out of the ``before_run_and_check_mypy`` ScenarioHooks hook
     """
 
-    start: str
+    start: List[str]
     expect_fail: bool
 
 

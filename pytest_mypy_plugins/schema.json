@@ -34,15 +34,28 @@
         ]
       },
       "start": {
-        "type": "string",
-        "description": "The file or folder relative to the temporary folder for the test that mypy checks",
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "The file(s) or folder(s) relative to the temporary folder for the test that mypy checks",
         "default": "main.py",
         "examples": [
           {
             "start": "."
           },
           {
-            "start": "main.py"
+            "start": [
+              "main.py",
+              "other.py"
+            ]
           }
         ]
       },

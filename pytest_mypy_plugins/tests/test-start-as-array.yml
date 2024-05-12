@@ -1,0 +1,12 @@
+- case: can_start_from_multiple_files
+  start:
+    - main.py
+    - other.py
+  main: |
+    reveal_type(1)
+  files:
+    - path: other.py
+      content: reveal_type(2)
+  out: |
+    main:1: note: Revealed type is "Literal[1]?"
+    other:1: note: Revealed type is "Literal[2]?"

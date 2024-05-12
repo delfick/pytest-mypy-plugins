@@ -21,7 +21,7 @@ class Hooks(ScenarioHooks):
         expected_output: MutableSequence[OutputMatcher],
         additional_properties: Mapping[str, object],
     ) -> ScenarioHooksRunAndCheckOptions:
-        if options.start == "stuff.py":
+        if "stuff.py" in options.start:
             scenario.make_file(File(path="stuff.py", content=f"reveal_type({additional_properties['desired_val']})"))
         return options
 

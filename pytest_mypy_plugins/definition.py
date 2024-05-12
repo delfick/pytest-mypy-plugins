@@ -153,7 +153,7 @@ class ItemDefinition:
     environment_variables: MutableMapping[str, object]
 
     out: str = ""
-    start: str = "main.py"
+    start: List[str] = dataclasses.field(default_factory=lambda: ["main.py"])
     skip: Union[bool, str] = False
     regex: bool = False
     mypy_config: str = ""
@@ -208,6 +208,10 @@ class ItemDefinition:
             if not isinstance(followups, list):
                 followups = []
             kwargs["followups"] = list(_parse_followups(followups))
+
+            # make sure start is a list of strings
+            if isinstance(raw_item.get("start"), str):
+                kwargs["start"] = [raw_item.pop("start")]
 
             # Get the parametrized options
             parametrized = raw_item.pop("parametrized", None)
