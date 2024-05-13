@@ -22,7 +22,7 @@ import jsonschema
 import pytest
 
 from . import utils
-from .scenario import Followup, MypyPluginsConfig, MypyPluginsScenario
+from .scenario import Followup, MypyPluginsConfig, MypyPluginsScenario, Strategy
 
 
 def validate_schema(data: List[Mapping[str, Any]], *, is_closed: bool = False) -> None:
@@ -124,7 +124,7 @@ def _run_skip(skip: Union[bool, str]) -> bool:
 
 
 def _create_output_matchers(
-    *, regex: bool, files: Sequence[utils.File], out: str, params: Mapping[str, object]
+    *, regex: bool, files: Sequence[utils.File], out: str, params: Mapping[str, object], cache_strategy: Strategy
 ) -> MutableSequence[utils.OutputMatcher]:
     expected_output: List[utils.OutputMatcher] = []
     for test_file in files:
@@ -133,7 +133,9 @@ def _create_output_matchers(
         )
         expected_output.extend(output_lines)
 
-    expected_output.extend(utils.extract_output_matchers_from_out(out, params, regex=regex))
+    expected_output.extend(
+        utils.extract_output_matchers_from_out(out, params, regex=regex, for_daemon=cache_strategy is Strategy.DAEMON)
+    )
     return expected_output
 
 
@@ -145,6 +147,7 @@ class ItemDefinition:
 
     case: str
     main: str
+    cache_strategy: Strategy
     files: MutableSequence[utils.File]
     followups: MutableSequence[Followup]
     starting_lineno: int
@@ -170,7 +173,9 @@ class ItemDefinition:
             raise ValueError(f"Invalid test name {self.case!r}, only '[a-zA-Z0-9_]' is allowed.")
 
     @classmethod
-    def from_yaml(cls, data: List[Mapping[str, object]], *, is_closed: bool = False) -> Iterator["ItemDefinition"]:
+    def from_yaml(
+        cls, data: List[Mapping[str, object]], *, is_closed: bool = False, cache_strategy: Strategy
+    ) -> Iterator["ItemDefinition"]:
         # Validate the shape of data so we can make reasonable assumptions
         validate_schema(data, is_closed=is_closed)
 
@@ -180,6 +185,7 @@ class ItemDefinition:
             additional_properties: Dict[str, object] = {}
             kwargs: Dict[str, Any] = {
                 "parsed_test_data": _raw_item,
+                "cache_strategy": cache_strategy,
                 "additional_properties": additional_properties,
             }
 
@@ -240,7 +246,11 @@ class ItemDefinition:
         clone.item_params = item_params
         clone.additional_mypy_config = utils.render_template(template=self.mypy_config, data=item_params)
         clone.expected_output = _create_output_matchers(
-            regex=clone.regex, files=[clone.main_file, *clone.files], out=clone.out, params=item_params
+            regex=clone.regex,
+            files=[clone.main_file, *clone.files],
+            out=clone.out,
+            params=item_params,
+            cache_strategy=self.cache_strategy,
         )
         return clone
 
@@ -338,6 +348,7 @@ class ItemDefinition:
             files=[utils.File(path=path, content=content) for path, content in files.items()],
             out=out,
             params=self.item_params,
+            cache_strategy=self.cache_strategy,
         )
 
         scenario.run_and_check_mypy(

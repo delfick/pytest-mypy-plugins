@@ -111,6 +111,10 @@ class ItemForHook(Protocol):
     additional_mypy_config: str
 
     @property
+    def cache_strategy(self) -> "Strategy":
+        pass
+
+    @property
     def files(self) -> MutableSequence[File]:
         pass
 

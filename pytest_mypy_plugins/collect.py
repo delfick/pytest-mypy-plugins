@@ -130,8 +130,9 @@ class YamlTestFile(pytest.File):
     def collect(self) -> Iterator[pytest.Item]:
         is_closed = self.config.option.mypy_closed_schema
         parsed_file = self.read_yaml_file(self.path)
+        cache_strategy = Strategy(self.config.option.mypy_cache_strategy)
 
-        for test in ItemDefinition.from_yaml(parsed_file, is_closed=is_closed):
+        for test in ItemDefinition.from_yaml(parsed_file, is_closed=is_closed, cache_strategy=cache_strategy):
             yield YamlTestItem.from_parent(
                 self,
                 name=test.test_name,

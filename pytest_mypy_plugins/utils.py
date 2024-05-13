@@ -4,8 +4,8 @@ import inspect
 import os
 import re
 import sys
-from dataclasses import dataclass
-from itertools import zip_longest
+from dataclasses import dataclass, field
+from itertools import count, zip_longest
 from pathlib import Path
 from typing import (
     Any,
@@ -14,6 +14,7 @@ from typing import (
     Iterator,
     Mapping,
     Optional,
+    Protocol,
     Sequence,
     Tuple,
     Union,
@@ -79,8 +80,22 @@ def maybe_abspath(fpath: Optional[str]) -> Optional[str]:
 MIN_LINE_LENGTH_FOR_ALIGNMENT = 5
 
 
+class OutputMatcher(Protocol):
+    fname: str
+    lnum: int
+    regex: bool
+
+    def matches(self, actual: str) -> bool: ...
+
+    def __str__(self) -> str: ...
+
+    def __format__(self, format_spec: str, /) -> str: ...
+
+    def __len__(self) -> int: ...
+
+
 @dataclass
-class OutputMatcher:
+class FileOutputMatcher:
     fname: str
     lnum: int
     severity: str
@@ -108,7 +123,30 @@ class OutputMatcher:
         else:
             return f"{self.fname}:{self.lnum}:{self.col}: {self.severity}: {self.message}"
 
-    def __format__(self, format_spec: str) -> str:
+    def __format__(self, format_spec: str, /) -> str:
+        return format_spec.format(str(self))
+
+    def __len__(self) -> int:
+        return len(str(self))
+
+
+_daemon_lines = iter(count())
+
+
+@dataclass
+class DaemonOutputMatcher:
+    line: str
+    regex: bool
+    fname: str = field(init=False, default="::mypy-daemon::")
+    lnum: int = field(init=False, default_factory=lambda: next(_daemon_lines))
+
+    def matches(self, actual: str) -> bool:
+        return str(self) == actual
+
+    def __str__(self) -> str:
+        return self.line
+
+    def __format__(self, format_spec: str, /) -> str:
         return format_spec.format(str(self))
 
     def __len__(self) -> int:
@@ -311,7 +349,7 @@ def extract_output_matchers_from_comments(
     The result is a list pf output matchers
     """
     fname = fname.replace(".py", "")
-    matchers = []
+    matchers: list[OutputMatcher] = []
     for index, line in enumerate(input_lines):
         # The first in the split things isn't a comment
         for possible_err_comment in line.split(" # ")[1:]:
@@ -329,7 +367,7 @@ def extract_output_matchers_from_comments(
                     severity = match.group(1)
                 col = match.group("col")
                 matchers.append(
-                    OutputMatcher(
+                    FileOutputMatcher(
                         fname,
                         index + 1,
                         severity,
@@ -341,14 +379,19 @@ def extract_output_matchers_from_comments(
     return matchers
 
 
-def extract_output_matchers_from_out(out: str, params: Mapping[str, Any], regex: bool) -> Sequence[OutputMatcher]:
+def extract_output_matchers_from_out(
+    out: str, params: Mapping[str, Any], regex: bool, for_daemon: bool
+) -> Sequence[OutputMatcher]:
     """Transform output lines such as 'function:9: E: message'
 
     The result is a list of output matchers
     """
-    matchers = []
+    matchers: list[OutputMatcher] = []
     lines = render_template(out, params).split("\n")
     for line in lines:
+        if line.startswith(":daemon:"):
+            if for_daemon:
+                matchers.append(DaemonOutputMatcher(line=line[len(":daemon:") :].lstrip(), regex=regex))
         match = re.search(
             r"^(?P<fname>.*):(?P<lnum>\d*): (?P<severity>.*):((?P<col>\d+):)? (?P<message>.*)$", line.strip()
         )
@@ -363,7 +406,7 @@ def extract_output_matchers_from_out(out: str, params: Mapping[str, Any], regex:
                 severity = match.group("severity")
             col = match.group("col")
             matchers.append(
-                OutputMatcher(
+                FileOutputMatcher(
                     match.group("fname"),
                     int(match.group("lnum")),
                     severity,
