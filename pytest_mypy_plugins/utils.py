@@ -154,8 +154,9 @@ class DaemonOutputMatcher:
 
 
 class TypecheckAssertionError(AssertionError):
-    def __init__(self, error_message: Optional[str] = None, lineno: int = 0) -> None:
+    def __init__(self, error_message: Optional[str] = None, lineno: int = 0, mypy_output: str | None = None) -> None:
         self.error_message = error_message or ""
+        self.mypy_output = mypy_output
         self.lineno = lineno
 
     def first_line(self) -> str:

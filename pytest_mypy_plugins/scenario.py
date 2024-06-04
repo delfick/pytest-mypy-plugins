@@ -474,7 +474,7 @@ class OutputChecker:
         mypy_output = stdout + stderr
         if ret_code == ReturnCodes.FATAL_ERROR:
             print(mypy_output, file=sys.stderr)
-            raise TypecheckAssertionError(error_message="Critical error occurred")
+            raise TypecheckAssertionError(error_message="Critical error occurred", mypy_output=mypy_output)
 
         output_lines = []
         for line in mypy_output.splitlines():
