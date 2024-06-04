@@ -522,6 +522,7 @@ class MypyPluginsScenario:
         expect_fail: bool,
         expected_output: MutableSequence[OutputMatcher],
         additional_properties: Mapping[str, object],
+        OutputCheckerKls: type[OutputChecker] = OutputChecker,
     ) -> None:
         config_file = self.mypy_plugins_config.prepare_config_file(self.execution_path, self.additional_mypy_config)
 
@@ -536,7 +537,7 @@ class MypyPluginsScenario:
             additional_properties=additional_properties,
         )
 
-        output_checker = OutputChecker(
+        output_checker = OutputCheckerKls(
             expect_fail=hook_result.expect_fail,
             execution_path=self.execution_path,
             expected_output=expected_output,

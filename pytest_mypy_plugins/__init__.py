@@ -1,6 +1,7 @@
 from .scenario import (
     ExtensionHook,
     Followup,
+    OutputChecker,
     ItemForHook,
     MypyPluginsConfig,
     MypyPluginsScenario,
@@ -17,6 +18,7 @@ __all__ = [
     "Followup",
     "FollowupFile",
     "OutputMatcher",
+    "OutputChecker",
     "MypyPluginsConfig",
     "MypyPluginsScenario",
     "ScenarioHookMaker",
