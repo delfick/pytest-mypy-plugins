@@ -223,9 +223,16 @@ class MypyPluginsConfig:
                 yield scenario
         finally:
             if self.strategy is Strategy.DAEMON and self.dmypy_executable is not None:
-                subprocess.run(
-                    [self.dmypy_executable, "stop"], cwd=str(execution_path), capture_output=True, check=True
-                )
+                try:
+                    subprocess.run(
+                        [self.dmypy_executable, "status"], cwd=str(execution_path), capture_output=True, check=True
+                    )
+                except subprocess.CalledProcessError:
+                    pass
+                else:
+                    subprocess.run(
+                        [self.dmypy_executable, "stop"], cwd=str(execution_path), capture_output=True, check=True
+                    )
             temp_dir.cleanup()
 
         assert not os.path.exists(temp_dir.name)
